@@ -105,10 +105,15 @@ def api(method, path, body=None, auth=True):
                 "      ./orchestrator.py run\n")
         raise SystemExit(f"API {method} {path} -> {e.code} {txt}")
 
-def offers(kind="on-demand", limit=40, gpu="RTX 5090", min_net=100):
+def offers(kind="on-demand", limit=40, gpu="RTX 5090", min_net=100, verified=False):
     q = {"gpu_name": {"eq": gpu}, "num_gpus": {"eq": 1}, "rentable": {"eq": True},
          "cuda_max_good": {"gte": 12.8}, "reliability2": {"gte": 0.95},
          "inet_down": {"gte": min_net}, "type": kind,
+         # Les offres les moins cheres sont systematiquement "deverified", et
+         # c'est la ou se trouvent les cartes sur-souscrites : une 4090 a 0,136
+         # portait cinq autres locataires. Une 4090 verifiee coute 0,309, soit
+         # le prix d'une 5090 -- le rabais etait le symptome.
+         **({"verified": {"eq": True}} if verified else {}),
          "order": [["dph_total", "asc"]], "limit": limit}
     return api("PUT", "search/asks/", {"q": q}, auth=False).get("offers", [])
 
@@ -291,7 +296,7 @@ def ensure_key():
 
 def cmd_offers(a):
     for kind in (["bid"] if a.bid else ["on-demand", "bid"]):
-        o = offers(kind, limit=a.count, gpu=a.gpu, min_net=a.min_net)
+        o = offers(kind, limit=a.count, gpu=a.gpu, min_net=a.min_net, verified=a.verified)
         print(f"\n=== {kind} : {len(o)} offres ===")
         print(f"{'offre':>10} {'$/h':>6} {'min':>6} {'cuda':>5} {'fiab':>5} {'net':>6}  lieu")
         for x in o[:a.count]:
@@ -352,7 +357,7 @@ def cmd_up(a):
     onstart = ("mkdir -p /root/.ssh && echo '%s' >> /root/.ssh/authorized_keys && "
                "chmod 700 /root/.ssh && chmod 600 /root/.ssh/authorized_keys" % pub)
     kind = "bid" if a.bid else "on-demand"
-    offs = offers(kind, limit=300, gpu=a.gpu, min_net=a.min_net)
+    offs = offers(kind, limit=300, gpu=a.gpu, min_net=a.min_net, verified=a.verified)
     if not offs: sys.exit("aucune offre 5090 disponible")
     c = db(); made = 0
     seen = {r[0] for r in c.execute("SELECT inst FROM workers WHERE inst IS NOT NULL")}
@@ -520,9 +525,9 @@ def main():
     q = S.add_parser("init");   q.add_argument("-n", type=int, default=31); q.add_argument("-T", type=int, default=8192); q.set_defaults(f=cmd_init)
     q = S.add_parser("plan");   q.add_argument("--hours", type=float, default=10); q.add_argument("--ratio", type=float, default=3.05); q.add_argument("--base", type=float, default=772); q.set_defaults(f=cmd_plan)
     q = S.add_parser("offers"); q.add_argument("--count", type=int, default=12); q.add_argument("--bid", action="store_true")
-    q.add_argument("--gpu", default="RTX 5090"); q.add_argument("--min-net", dest="min_net", type=float, default=100); q.set_defaults(f=cmd_offers)
+    q.add_argument("--gpu", default="RTX 5090"); q.add_argument("--min-net", dest="min_net", type=float, default=100); q.add_argument("--verified", action="store_true"); q.set_defaults(f=cmd_offers)
     q = S.add_parser("up");     q.add_argument("--count", type=int, required=True); q.add_argument("--bid", type=float, default=0); q.add_argument("--max-price", type=float, default=0.40)
-    q.add_argument("--gpu", default="RTX 5090"); q.add_argument("--min-net", dest="min_net", type=float, default=400); q.set_defaults(f=cmd_up)
+    q.add_argument("--gpu", default="RTX 5090"); q.add_argument("--min-net", dest="min_net", type=float, default=400); q.add_argument("--verified", action="store_true"); q.set_defaults(f=cmd_up)
     q = S.add_parser("tfa")
     q.add_argument("--code"); q.add_argument("--backup"); q.add_argument("--secret")
     q.add_argument("--method", default="totp", choices=["totp", "sms", "email"])
