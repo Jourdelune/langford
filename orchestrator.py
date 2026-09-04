@@ -63,11 +63,22 @@ def api(method, path, body=None, auth=True):
     except urllib.error.HTTPError as e:
         txt = e.read().decode()[:300]
         if e.code == 401 and "Two Factor" in txt:
-            sys.exit("\n*** La cle API n'a pas les privileges de gestion d'instances.\n"
-                     "    vast.ai exige une cle creee depuis une session 2FA.\n"
-                     "    cloud.vast.ai -> Account -> API Keys -> creer une nouvelle cle,\n"
-                     "    puis la remplacer dans .env.  Le reste (init/run local/merge)\n"
-                     "    fonctionne sans cle.\n")
+            sys.exit(
+                "\n*** Le compte vast.ai bloque tous les appels authentifies.\n"
+                "    Constate sur instances/, machines/, invoices/, users/current/,\n"
+                "    team/members/ ET tfa/status/ : erreur identique partout, avec\n"
+                "    trois cles differentes. Ce n'est donc ni la cle ni son scope,\n"
+                "    mais une barriere au niveau du compte -- et il n'existe aucun\n"
+                "    endpoint permettant d'elever une cle avec un code TOTP.\n\n"
+                "    A faire dans la console (cloud.vast.ai) :\n"
+                "      1. se deconnecter, se reconnecter, et VERIFIER qu'un code a\n"
+                "         6 chiffres est demande. Sinon la 2FA n'est pas active,\n"
+                "         et c'est la cause.\n"
+                "      2. depuis cette session-la : Keys -> +New (full access).\n\n"
+                "    L'API ne sert qu'a `up` et `down`. Pour lancer sans elle :\n"
+                "      ./orchestrator.py sshkey     (a coller dans Account -> SSH Keys)\n"
+                "      ./orchestrator.py add --ssh \"ssh -p PORT root@HOTE\"\n"
+                "      ./orchestrator.py run\n")
         raise SystemExit(f"API {method} {path} -> {e.code} {txt}")
 
 def offers(kind="on-demand", limit=40, gpu="RTX 5090"):
