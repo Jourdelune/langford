@@ -6,19 +6,32 @@ nombres. Exhiber une solution est trivial ; les compter toutes est un problème
 ouvert au-delà de n=28.
 
 Ce dépôt contient une implémentation CUDA de la méthode algébrique de Godfrey,
-poussée jusqu'à **5,30× plus vite** que mon point de départ, avec au passage la
+poussée jusqu'à **5,84× plus vite** que mon point de départ — et **~39× plus
+vite que l'état de l'art publié, sur le même matériel** — avec au passage la
 fermeture — par preuve ou par mesure — de trois pistes qui étaient jusque-là
 seulement « non abouties ».
 
 | | n=24 | n=27 | n=28 | **n=31** |
 |---|---|---|---|---|
+| état de l'art publié (2015), sur la même 4070 | ≈ 1,4 h | ≈ 3,6 j | ≈ 14,4 j | **≈ 1 100 j** |
 | point de départ (v3) | 15,9 min | 16,9 h | 2,82 j | 180,1 j |
-| **v6 (ce dépôt)** | **3,0 min** | **3,18 h** | **12,7 h** | **≈ 34,0 j** |
+| v6 | 3,0 min | 3,18 h | 12,7 h | ≈ 34,0 j |
+| **v6.1 (ce dépôt)** | **2,8 min** | **≈ 2,95 h**† | **≈ 11,7 h**† | **≈ 30,9 j** |
+
+† n=27 et n=28 ne sont pas remesurés : le gain de la v6.1 est mesuré à n=24
+(+6,10 %) et à n=31 (+10,13 %), et interpolé linéairement entre les deux. Voir
+§4.9.
+
+Lignes 2 à 4 : mesurées. Ligne 1 : modélisée — la version publiée n'est pas
+réimplémentée ici, son coût est reconstitué à partir de ses deux écarts avec ma
+v3 (symétrie ×4 au lieu de ×8, arithmétique modulaire + CRT au lieu d'un bignum
+tronqué). Dérivation, incertitude et recoupement au §6, « Le point de départ
+vrai ».
 
 **Ce qui est fait** : le record publié de 2015 — L(28), obtenu sur ~32 GPU en
-9 jours — se refait ici en **12,7 heures sur une seule RTX 4070**.
+9 jours — se refait ici en **~11,7 heures sur une seule RTX 4070**.
 **Ce qui ne l'est pas** : L(2,31) reste inconnu. Ce dépôt n'a pas battu le
-record ; il en a divisé le coût par ~545.
+record ; il en a divisé le coût par ~600.
 
 ---
 
@@ -146,18 +159,92 @@ Quatre contrôles indépendants s'ajoutent :
   les précédentes ni les coordonnées, ni l'ordre de parcours, ni la mise en
   œuvre de la symétrie, ni la structure de boucle. Qu'elle retrouve exactement
   les mêmes valeurs jusqu'à n=24 est une vérification indépendante forte.
-* **Auto-test intégré, gratuit.** Le total doit être divisible par 2^{2n}
-  (= 2⁶² pour n=31) : les 2n bits de poids faible doivent sortir nuls. Une
-  corruption quelconque échoue à ce test avec probabilité 1 − 2^{−2n}.
+* **Auto-test intégré, gratuit — sur le total.** Le total doit être divisible
+  par **2^{2n+1}** (= 2⁶³ pour n=31) : 2n bits parce que le total vaut
+  2^{2n}·V(n), plus un parce que V(n) = 2·L(2,n) est pair — aucun appariement
+  de Langford n'est son propre miroir, il faudrait 2p = 2n−k pour tout k, ce
+  qui est impossible dès que k est impair. Une corruption *aléatoire* échoue à
+  ce test avec probabilité 1 − 2^{−(2n+1)}. **Attention à ne pas surinterpréter** :
+  le test ne regarde que les bits bas, donc une erreur d'**un seul bit au-delà
+  de la position 2n+1** le passe intégralement (§3.3).
+* **Auto-test par tranche, gratuit aussi.** Chaque terme est un produit des n
+  facteurs A_i et A_i ≡ i (mod 2), donc les ⌊(n+1)/2⌋ **écarts pairs** donnent
+  chacun un facteur 2 : toute somme partielle est divisible par 2^{⌊(n+1)/2⌋}
+  (2¹⁶ à n=31). Contrairement au précédent, ce test vaut pour une tranche
+  **isolée** : une tranche corrompue est rejetée sur la machine qui l'a
+  produite, pas trois semaines plus tard. Mesure sur les tranches n=31 déjà
+  rendues : v₂ ≥ 24, soit 8 bits de marge sur les 16 garantis.
 * **Référence CPU indépendante.** `oe_ref` recalcule V(n) dans les coordonnées
   de parité, sans GPU, et concorde.
 
 ### 3.3 Ce que la validation ne couvre pas
 
-Elle ne prouve pas l'absence de bug qui ne se manifesterait qu'à n=31 : les
-chemins de code dépendants de n (largeurs de masques, nombre d'écarts, tailles
-de table) sont exercés à n=24 mais pas aux valeurs exactes de n=31. L'auto-test
-de divisibilité reste la garantie de dernier recours sur un run réel.
+**Un bug propre à n=31.** Les chemins de code dépendants de n (largeurs de
+masques, nombre d'écarts, tailles de table) sont exercés à n=24 mais pas aux
+valeurs exactes de n=31. v6 n'a **jamais** tourné à n=27 ni n=28 — `val27.txt`
+n'est qu'un en-tête, et au format v3. Ces deux valeurs sont publiées et coûtent
+~2,9 h + ~11,7 h : c'est le trou le moins cher à fermer, et il ne l'est pas.
+
+**Une erreur d'un seul bit dans les bits hauts d'une tranche.** Les deux
+auto-tests ne contraignent que les bits bas : celui par tranche les 16 premiers,
+celui du total les 63 premiers. Un bit flippé au-delà passe les deux et donne
+une réponse fausse d'allure parfaitement plausible. Vérifié en injectant la
+faute : sur les tranches réelles de n=20, un bit inversé en position 128 est
+accepté sans broncher. Sur les 160 positions d'une tranche, **63 sont couvertes
+par les auto-tests** et une vingtaine tout en haut par l'écart à l'estimateur de
+Knuth (± 2 %) ; **les ~75 du milieu ne le sont par rien**. Seuls un rejeu (l'audit
+du §3.4) ou une somme de contrôle transportée avec la ligne `PART` les
+attrapent — la seconde n'existe pas encore.
+
+**Et, évidemment, un bug qui donnerait la même réponse fausse dans deux versions
+indépendantes.** Rien ne l'exclut ; c'est la limite ordinaire de ce genre de
+calcul.
+
+### 3.4 Checklist
+
+Ce qu'il faudrait cocher pour que le résultat d'un run n=31 soit défendable, et
+où on en est. **P** = démontré, **M** = vérifié par calcul (commande donnée),
+**✗** = non couvert.
+
+**La méthode donne bien le nombre d'appariements**
+
+| | ce qui doit être vrai | | comment |
+|---|---|---|---|
+| 1 | l'identité de Godfrey extrait 2·L(2,n) | **P** | homogénéité de degré 2n en 2n variables, §3.1(1) |
+| 2 | la troncature à 2¹⁶⁰ est exacte | **P** | somme = 2^{145,3}, 15 bits de marge, §3.1(5) |
+| 3 | A_i ≡ i (mod 2) : seuls les écarts pairs annulent | **P** | §3.1(3) |
+| 4 | le groupe de symétries est d'ordre exactement 8 | **P M** | preuve §3.1(4) + `./fiber 12` |
+| 5 | décomposition de parité | **P M** | calcul d'indices + `./oe_check 31` → 6 200 000 écarts, 0 divergence |
+| 6 | réflexion : demi-énumération poids 2 + orbites fixes poids 1 | **P M** | `./refl_test 7 8 11 12` → 0 échec d'involution, 0 écart de sommande, demi-énumération exacte |
+| 7 | V(n) = 2·L(2,n) est **pair** | **P** | aucun appariement n'est son propre miroir : 2p = 2n−k impossible pour k impair |
+| 8 | toute somme partielle est divisible par 2^{⌊(n+1)/2⌋} | **P M** | ⌊(n+1)/2⌋ écarts pairs ; vérifié sur toutes les tranches n=31 rendues à ce jour (v₂ ≥ 24 mesuré, 16 garantis) |
+
+**Le code calcule bien cette somme**
+
+| | | | |
+|---|---|---|---|
+| 9 | v6 reproduit les valeurs connues | **M** | n = 11, 12, 15, 16, 19, 20 **et 23** rejoués avec le binaire courant, valeurs exactes ; n=23 est le plus grand cas ≡ 3 (mod 4) atteignable en quelques minutes, donc le plus proche parent de n=31 |
+| 10 | une référence CPU sans GPU concorde | **M** | `./oe_ref 12` et `./oe_ref2 12` → 108 144, idem n = 7, 8, 11 |
+| 11 | recoupement entre versions indépendantes | **M** | v3/v4/v5 identiques au bit près sur n=31, deux géométries de shard (§3.2) |
+| 12 | une tranche est déterministe (rejeu bit à bit) | **M** | tâche 6607 du run n=31 rejouée → `PART` identique |
+| 13 | **les chemins de code propres à n=31** | **✗** | v6 n'a jamais tourné à n=27/28. ~2,9 h + ~11,7 h. |
+
+**Le run de plusieurs semaines n'a pas dérivé**
+
+| | | | |
+|---|---|---|---|
+| 14 | tranche manquante ou dupliquée | **M** | `collect.sh` (complétude + doublons) puis divisibilité par 2^{2n+1} |
+| 15 | corruption dans les 16 bits bas d'une tranche | **M** | auto-test par tranche, sur la machine productrice |
+| 16 | corruption dans les bits 16 à 62 | **M** | auto-test du total |
+| 17 | **corruption dans les bits ≥ 63 d'une tranche** | **✗** | angle mort mesuré (§3.3). Mitigation : rejouer 1–2 % des tâches sur une autre carte et comparer bit à bit (~5 h, ~2 $) ; une somme de contrôle sur la ligne `PART` le fermerait complètement |
+| 18 | erreur structurelle (symétrie, terme diagonal) | **M** | `./estimate 31` → 5,74·10²⁴ ± 2 % ; toute erreur de ce type décale d'un facteur ≥ 2 |
+| 19 | **recalcul complet indépendant** | **✗** | v5 sur n=31 : 75 j sur la 4070, ~25 j sur une 5090 (~120 $). C'est la seule chose qui mérite le nom de preuve. |
+
+Deux remarques pour finir. **Il n'existe aucun moyen connu de vérifier ce
+résultat plus vite que de le recalculer** — pas de certificat succinct, c'est le
+corollaire direct du 4ⁿ du §5. Et **publier les 8 193 sommes partielles** ne
+coûte rien : n'importe qui peut alors refaire l'addition, refaire les
+auto-tests, et recalculer les tranches de son choix sans refaire le run.
 
 ---
 
@@ -171,7 +258,8 @@ Tous les débits sont mesurés GPU au repos, moyennés sur des shards répartis
 | v3 — Godfrey + symétrie ×8 | 37,0 | 180,1 j | — |
 | v4 — saut des termes nuls | 65,6 | 101,7 j | ×1,77 |
 | v5 — demi-état + déroulage | 89,0 | 75,0 j | ×2,40 |
-| **v6 — parité + bitmaps de survie** | **392,7\*** | **34,0 j** | **×5,30** |
+| v6 — parité + bitmaps de survie | 392,7\* | 34,0 j | ×5,30 |
+| **v6.1 — chaînes de retenue + PRMT** | **432,5\*** | **30,9 j** | **×5,84** |
 
 \* la v6 énumère 2^{2n−2} points nominaux dont la moitié n'est jamais lancée ;
 le débit est rapporté à ce total nominal.
@@ -264,6 +352,20 @@ Drain final : **287 instructions SASS par point survivant**.
 * **Fusion des deux popcounts par écart.** On n'a besoin que de leur somme
   (C_m = 2N−2m−1 − 2(R+R')), donc un `__popcll` sur un mot 64 bits assemblé
   suffirait — sauf que `__popcll` est déjà compilé en deux POPC et une addition.
+* **Instructions vidéo PTX** (`vmad.s32.s32.s32 d, a.b0, a.b1, 0`), qui
+  calculeraient le produit de deux octets signés extraits *en une instruction*.
+  Sur Ada elles ne sont plus câblées : ptxas les développe en **deux PRMT par
+  opérande** plus l'IMAD, soit 9 instructions là où le §4.9 en met 3. Vérifié
+  au désassemblage, jamais mesuré — inutile.
+* **Parité du signe en un seul popcount.** `popc(a)+popc(b) ≡ popc(a^b) (mod 2)`,
+  donc `sgn` peut se calculer avec un POPC au lieu de deux. Exact, mais ptxas
+  rend le même compte d'instructions (2 POPC + IADD3 → 1 POPC + LOP3 + 2 NOP de
+  bourrage) : **0,0 % à trois tours de mesure**. Non retenu — la ligne d'origine
+  est validée, on ne la touche pas pour rien.
+* **Rebalayage de K après la v6.1.** Le drain ayant maigri de 12,5 %, l'optimum
+  aurait pu se déplacer. Non : K=8 mesure 796 h (registres 64 → 71, et 34,8 Ko
+  de mémoire partagée qui font tomber l'occupancy), K=6 mesure ~1 570 h. **K=7
+  reste l'optimum**, avec la même marge qu'avant.
 
 ### 4.7 Quatre pièges de mesure, et une leçon d'architecture
 
@@ -336,6 +438,133 @@ une FMA un seul). Il n'est donc ni à optimiser par l'occupancy, ni par les
 pipes, ni par la mémoire : **seul le nombre d'instructions compte encore**. Et
 il est à 15 % de son plancher, avec les 22 popcounts des écarts impairs
 exactement au minimum et l'arbre de produit à ~1,4× du sien.
+
+**Contrôle du modèle (v6.1).** Cette conclusion se teste : si seul le compte
+d'instructions compte, alors remplacer les 23 POPC du drain par un `& 31` — même
+graphe de dépendances, un LOP3 au lieu d'un POPC — doit rapporter *exactement*
+ce que vaut la différence de compte, ni plus. Mesure : la sonde retire 12
+instructions nettes par survivant sur ~250 et gagne **4,9 %** (deux tours,
+617,8 h contre 648,0 h). Le modèle prédit 4,8 %. Le POPC n'a donc **pas** de
+pénalité de débit cachée sur Ada, et toute idée qui échangerait des popcounts
+contre des lectures en mémoire partagée est perdante d'avance — ce qui ferme la
+généralisation du §4.5 à tous les écarts impairs.
+
+### 4.9  v6.1 — ce que le C ne sait pas dire (×1,101)
+
+Le §4.8 conclut que seul le compte d'instructions compte encore. Deux endroits
+du drain en portaient plus que nécessaire, et pour la même raison : nvcc traduit
+fidèlement ce que le C exprime, et le C n'a de mots ni pour une **chaîne de
+retenue**, ni pour une **extraction signée d'octet**. Aucun des deux changements
+ne touche à l'algorithme ; les deux sont des réécritures locales en PTX.
+
+**1. L'arbre de produit, en chaînes de retenue (+6,06 %).**
+
+L'étage final formait ses neuf produits partiels en `uint64_t` puis recombinait
+les moitiés à la main. ptxas n'a alors pas le choix : chaque produit occupe une
+paire de registres, et les retenues se propagent par des IADD3/IADD3.X séparés —
+les ~21 instructions de propagation annoncées au §5.3. Les formes
+`mad{c}.{lo,hi}.cc` du PTX **absorbent l'addition et la retenue dans le
+multiplieur** : une IMAD par produit partiel, zéro addition explicite.
+
+    ligne c_j :  passe sur les moities BASSES  (une chaine de retenue)
+                 passe sur les moities HAUTES  (l'autre)
+
+Deux passes par ligne parce qu'il n'y a **qu'un seul** drapeau de retenue : les
+`lo` et les `hi` d'une même ligne ne peuvent pas s'entrelacer. Les retenues qui
+sortent du limbe 4 sont jetées — la troncature à 160 bits est gratuite. L'étage
+96×96 tombe de ~30 à **17 instructions**, l'étage 64×64 de ~9 à **7**.
+
+Deux pièges, tous deux silencieux :
+
+* le drapeau de retenue n'est pas modélisé par le compilateur, donc **une chaîne
+  doit tenir dans un seul bloc `asm`** — sinon ptxas peut y glisser une
+  instruction qui l'écrase ;
+* les sorties doivent être en `"=&r"` (earlyclobber). Sans le `&`, le
+  répartiteur a le droit d'aliaser une sortie écrite tôt avec une entrée relue
+  plus tard dans la chaîne, et le résultat est faux une fois sur ~2³².
+
+Effet mesuré sur le mélange : **IADD3 149 → 95**, IMAD 429 → 455. C'est aussi
+l'échange que l'hypothèse 1 du §4.8 avait tenté et raté (`__umulhi` pour les
+décalages, 4 % plus lent) — la différence est que celui-ci *retire* des
+instructions au lieu d'en déplacer.
+
+**2. L'extraction des octets SWAR, en une instruction (+3,9 %).**
+
+Le drain lit 16 valeurs d'écart pair empaquetées en quatre mots SWAR, et doit
+étendre chaque octet en entier 32 bits **signé**. `prmt.b32` fait exactement
+cela : quand le bit 3 d'un sélecteur est mis, l'octet de sortie vaut 0x00 ou
+0xFF selon le **signe** de l'octet choisi. Un sélecteur `(8|j, 8|j, 8|j, j)`
+étend donc l'octet *j*, seul, en une instruction.
+
+nvcc ne connaît ce motif que pour l'octet 0 ; pour les octets 1 et 2 il émet
+décalage + xor + décalage arithmétique. Compté au désassemblage : **9
+instructions par mot SWAR au lieu de 5**, sur 4 mots et pour chaque survivant.
+Les quatre sélecteurs sont 0x8880, 0x9991, 0xAAA2, 0xBBB3.
+
+    PRMT 16 → 40      SHF 194 → 170      LOP3 252 → 236
+
+**Bilan.** `oe_kernel<31,7>` passe de **1 592 à 1 520 instructions SASS**. Le
+drain y figure deux fois (paquet plein et queue), donc **−36 instructions par
+survivant : 287 → 251**, soit −12,5 %.
+
+| | n=24 (bout en bout) | n=31 (`--bench`) |
+|---|---|---|
+| v6 | 197,11 s | 714,6 h / 720,2 h |
+| **v6.1** | **185,78 s** | **648,9 h / 654,0 h** |
+| gain | **+6,10 %** | **+10,13 %** |
+
+Les deux gains sont mesurés séparément (+6,06 % pour le premier seul,
++10,23 % pour les deux) ; le total ci-dessus est remesuré d'un bloc à la fin,
+d'où le +10,13 % plutôt que le produit exact des deux.
+
+Protocole : GPU au repos, mesures **appariées et alternées** base/v6.1 pour
+absorber la dérive d'horloge, deux échantillons de `vhi` indépendants
+(`--bench 64` et `--bench 96`), deux tours chacun. Les quatre tours donnent
++10,19 / +10,06 / +10,09 / +10,18 % — **reproductible à 0,07 %**, alors que
+chaque valeur absolue porte ±8 % d'erreur d'échantillonnage. C'est le rapport
+qui est mesuré ici, pas les absolus (§4.7, piège n° 4).
+
+Le gain dépend de *n* parce que le drain n'est pas la même fraction du travail :
+à n=24 il y a 12 écarts impairs et 12 pairs contre 15 et 16 à n=31, et les
+phases de construction des tables, elles, ne changent pas.
+
+**Ce que ça ne change pas.** Trois contrôles, et il faut dire ce que chacun
+couvre exactement :
+
+1. **Les huit valeurs connues** (n = 11, 12, 15, 16, 19, 20, 23, 24) sont
+   reproduites à l'unité près par le run complet. Cela exerce tout le chemin,
+   mais pas aux valeurs de n=31.
+2. **L'arbre de produit ne dépend pas de n.** `prod160m` n'est ni templaté ni
+   paramétré par N : son équivalence bit-à-bit avec la version d'origine a été
+   vérifiée sur 2²⁰ tirages couvrant tout le domaine réel des A_i (uniformes
+   dans [−61, 61], plus un huitième de cas extrêmes à ±61, où les produits
+   partiels sont les plus grands). **0 divergence.** Ce contrôle-là vaut donc
+   *aussi* pour n=31.
+3. **L'extraction PRMT, elle, est dans un noyau dépendant de n.** Le noyau
+   diagonal sort des sommes **identiques au bit près** à n = 11, 16, 20, 24,
+   **27, 28 et 31** : les largeurs de masque et le nombre d'écarts propres à
+   n=31 — que le §3.3 signale comme non couverts par le reste de la validation —
+   sont donc exercés pour ce changement-ci.
+
+4. **Et le contrôle direct**, le seul qui porte sur le noyau principal *à*
+   n=31 : cinq tranches réelles recalculées par les deux binaires, réparties sur
+   toute la plage de `vhi` (0 — le shard dégénéré du §4.7 —, 1 000, 4 698 750,
+   8 000 000, et la queue où la réflexion élague tout). **Sommes partielles
+   identiques au bit près.**
+
+Conséquence pratique : les lignes `PART=` déjà produites par la v6 restent
+valides et s'agrègent sans réserve avec celles de la v6.1. La géométrie des
+tranches ne change pas non plus (K reste à 7), donc une campagne interrompue
+reprend simplement plus vite.
+
+Ce que ça ne couvre toujours pas : un run complet de `oe_kernel` à n=27 ou 28.
+Le trou du §3.3 reste ouvert, ni plus ni moins qu'avant.
+
+**Un bug latent trouvé au passage.** `sPw[256][9]` codait en dur le nombre de
+mots réservés aux R(m) constants du §4.5. Neuf est le bon compte pour n=31 et
+K=7 — et pour eux seuls : à K=6 il en faut dix, et le dixième mot débordait dans
+la file des survivants du bloc, d'où un accès illégal. Le compte est maintenant
+dérivé de (N, K). C'est neutre à K=7, à l'octet et à l'instruction près.
 
 ---
 
@@ -442,10 +671,15 @@ Aucun record plus accessible dans la famille.
   contrainte de distinction des écarts (2ⁿ) **sans que les deux se multiplient**.
   La structure particulière du problème — la couleur d'une arête est déterminée
   par ses extrémités — n'a pas encore été exploitée pour cela.
-* **Arithmétique du produit.** L'arbre 160 bits est à ~161 instructions contre un
-  minimum théorique de ~116. Karatsuba au dernier étage, ou un ordonnancement
-  qui réduit les 21 instructions de propagation de retenue, laisseraient peut-être
-  10 à 15 %.
+* ~~**Arithmétique du produit.**~~ **Fermée par la v6.1** (§4.9). Les 21
+  instructions de propagation de retenue ont disparu : les formes
+  `mad{c}.{lo,hi}.cc` du PTX les absorbent dans le multiplieur, et l'étage final
+  96×96→160 tombe à 17 instructions pour 17 produits partiels nécessaires —
+  c'est-à-dire au plancher, une IMAD par produit et rien d'autre. Karatsuba y
+  échangerait 2 multiplications contre une demi-douzaine d'additions : perdant.
+  Reste l'arbre au-dessus (les 8 produits de feuilles et les 12 étages
+  intermédiaires), qui est un arbre binaire équilibré et n'a pas de gras
+  identifié.
 
 ### 5.4  Idées propres, dérivées ici — et pourquoi elles ne cassent pas le 4ⁿ
 
@@ -741,25 +975,76 @@ dernier point du record publié :
 | | matériel | temps | GPU-jours |
 |---|---|---|---|
 | Assarpour, Bar-Noy & Liu (2015) | ~32 GPU Kepler | ~9 jours | ~288 |
-| **ce dépôt (v6)** | 1 × RTX 4070 | **12,7 h** | **0,53** |
+| **ce dépôt (v6.1)** | 1 × RTX 4070 | **≈ 11,7 h** | **0,49** |
 
-soit **~545× moins de GPU-jours**. Une part revient au matériel : un GPU Kepler
+soit **~590× moins de GPU-jours**. Une part revient au matériel : un GPU Kepler
 de 2013 délivre ~1,3·10¹² opérations entières/s contre 7,3·10¹² pour une 4070
 (≈ 1,5·10¹³ en comptant le pipe FMA), soit un facteur **6 à 11**. Le reste —
 **environ 50 à 90×** — vient de l'algorithme et de l'implémentation : symétrie
 d'ordre 8 complète, saut des 87 % de produits nuls, décomposition de parité,
 bitmaps de survie, et une arithmétique 160 bits tronquée plutôt que du CRT
-modulaire.
+modulaire. Chiffré directement à matériel identique (ci-dessous), cet écart
+purement algorithmique vaut **~38×** ; les 50 à 90× le dépassent parce qu'ils
+absorbent aussi le rendement de leur distribution sur ~32 cartes.
+
+### Le point de départ vrai : l'état de l'art publié, sur la même carte
+
+Le tableau du §4 part de ma **v3**, qui contient déjà deux choses absentes de
+l'état de l'art publié. Pour savoir ce que ce dépôt fait gagner *à matériel
+identique*, il faut chiffrer la version publiée sur la même 4070. Deux écarts,
+et un seul est incertain.
+
+* **La symétrie — exactement ×2, et ce n'est pas une estimation.** Assarpour
+  *et al.* épinglent deux coordonnées (facteur 4) et n'exploitent pas la
+  réflexion ; la v3 l'exploite et énumère 2^{2n−3} points au lieu de 2^{2n−2}.
+  Le prédicat étant résolu au niveau du shard (§2.3), le coût par point ne
+  bouge pas : le rapport est exactement 2.
+* **L'arithmétique — ×4 sur le produit.** Ils accumulent modulo plusieurs
+  premiers puis recombinent par CRT ; ici la somme tient dans 2¹⁶⁰ tronqué
+  (§3.1). À n=31 elle vaut 2^{145,3}, donc il faut **5 premiers de 31 bits**,
+  soit 5 × 31 multiplications modulaires par point contre un seul arbre
+  160 bits de ~125 instructions (161 avant la v6.1, §4.9). Le facteur ~4 est
+  celui du §6.bis ; le
+  décompte d'instructions le confirme et donne sa fourchette — 2,5× pour une
+  implémentation modulaire soignée (petits facteurs groupés par 4 avant
+  réduction), 5× pour une implémentation directe.
+
+Le produit pèse **70,6 % du temps de la v3** (§4.1), donc l'arithmétique
+modulaire multiplie le coût par point par 0,294 + 0,706 × 4 = **3,12**, et la
+symétrie manquante double le nombre de points :
+
+| n=31, sur la même RTX 4070 | points | arithmétique | temps |
+|---|---|---|---|
+| Godfrey nu (2002), sans symétrie | 2⁶² | modulaire + CRT | ≈ 4 500 j |
+| **état de l'art publié** (Assarpour *et al.*, 2015) | 2⁶⁰ | modulaire + CRT | **≈ 1 100 j — 3 ans** |
+| même énumération, arithmétique de ce dépôt (v1/v2) | 2⁶⁰ | 160 bits tronqué | 360 j |
+| v3 — point de départ du §4 | 2⁵⁹ | 160 bits tronqué | 180,1 j |
+| v6 | 2⁵⁹ nominal | + bitmaps de survie | 32,2 j (mesuré) |
+| **v6.1 — ce dépôt** | 2⁵⁹ nominal | + arbre en chaînes de retenue | **29,2 j (mesuré)** |
+
+> **≈ 1 100 jours contre 29,2 mesurés : ~38× à matériel identique.**
+> Fourchette 740 à 1 380 jours selon la qualité de l'implémentation modulaire,
+> soit **23× à 43×**. Le 5,30× du §4 n'en est que la partie v3 → v6.
+
+Deux précautions. D'abord ce chiffrage est **favorable au point de comparaison** :
+il lui prête mon code de Gray, mon empaquetage SWAR et mon arbre de produit, et
+ne lui facture que l'arithmétique et la symétrie. Ensuite il se recoupe avec le
+seul point de mesure réel : appliqué à n=28 — où 4 premiers suffisent, donc un
+facteur 5,11 au lieu de 6,25 — il donne 14,4 j sur une 4070, soit **86 à
+158 GPU-jours Kepler** avec le facteur matériel de 6 à 11× ; le calcul publié
+en a coûté ~288. Le modèle est donc **conservateur d'un facteur 1,8 à 3,3**,
+l'écart restant étant le rendement de leur distribution sur ~32 cartes.
 
 **Sur le record lui-même : non, pas encore.** L(2,31) reste inconnu. Ce qui a
-changé, c'est son prix :
+changé, c'est son prix — colonne « avant » = ma v3 ; l'état de l'art publié, lui,
+demanderait ≈ 1 100 jours sur la même carte :
 
-| | avant | maintenant |
+| | avant (v3) | maintenant (v6.1) |
 |---|---|---|
-| sur une 4070 | 180 jours | **34,0 jours** |
-| sur une RTX 4090 | ~67 jours | **~12,6 jours** |
-| en location grand public (~0,35 $/h) | ~560 $ | **~106 $** |
-| en parallèle | ~26 GPU pendant une semaine | **~5 GPU pendant une semaine** |
+| sur une 4070 | 180 jours | **30,9 jours** |
+| sur une RTX 4090 | ~67 jours | **~11,4 jours** |
+| en location grand public (~0,35 $/h) | ~560 $ | **~96 $** |
+| en parallèle | ~26 GPU pendant une semaine | **~4,5 GPU pendant une semaine** |
 
 Le record passe d'une allocation de calcul intensif à un budget individuel.
 C'est un changement de **classe d'accessibilité**, pas de classe de complexité.
@@ -775,16 +1060,22 @@ de refaire ces chemins.
 
 | | n=31 |
 |---|---|
-| **v6, mesurée** | **34,0 j** |
-| même code à 100 % d'émission (inatteignable) | 19,2 j |
-| compte d'instructions à son minimum (~250/survivant), à 100 % | 17,1 j |
+| v6, mesurée | 34,0 j |
+| **v6.1, mesurée** | **30,9 j** |
+| même code à 100 % d'émission (inatteignable) | 17,1 j |
 
-42 instructions par point canonique (0,129 × 287 de drain, plus ~5 de base),
-196,4 Gsums/s canoniques → 8,25·10¹² instructions/s contre un plafond d'émission
-de 1,46·10¹³ : **57 % du plafond de la carte**, et **15 % au-dessus du plancher
-d'instructions**. Les 22 popcounts restants des écarts impairs sont exactement
-au minimum (2 SHF, 2 LOP3, 2 POPC, 2 arithmétiques par écart non précalculé) ;
-l'arbre de produit est à ~1,4× du sien.
+37,4 instructions par point canonique (0,129 × 251 de drain, plus ~5 de base),
+216,3 Gsums/s canoniques → 8,09·10¹² instructions/s contre un plafond d'émission
+de 1,46·10¹³ : **55 % du plafond de la carte**. Le gain de la v6.1 est donc
+**entièrement** du compte d'instructions — le taux d'émission, lui, baisse
+légèrement (57 % → 55 %), ce qui est cohérent avec un noyau qui exécute la même
+chose avec moins d'instructions et non mieux ordonnancées.
+
+Les 22 popcounts des écarts impairs sont exactement au minimum (2 SHF, 2 LOP3,
+2 POPC, 2 arithmétiques par écart non précalculé) et l'arbre de produit l'est
+aussi désormais (§4.9). Le plancher de ~250 instructions par survivant estimé
+pour la v6 est **atteint** (251) — ce qui veut surtout dire que cette
+estimation-là est à refaire avant de servir de repère.
 
 Ce qui reste n'est ni l'occupancy, ni les pipes, ni la mémoire — les trois ont
 été testés et éliminés (§4.8). Le noyau est à ~80 % du plafond que lui impose son
@@ -882,24 +1173,33 @@ PROJECTION n=31 : 777.7 h GPU = 32.40 jours   (IC95% 653.6 .. 901.8 h)
 Contrôle : un échantillon hors-ligne de 144 tirages donne 772 h (IC95 %
 696–850). Les deux méthodes concordent à 0,8 %.
 
-> **RTX 4070 : n=31 en 32,2 jours (772 h GPU), IC95 % [696, 850].**
-> Le chiffre de 34,0 j annoncé plus haut venait du débit nominal en Gsums/s ;
+> **RTX 4070 : n=31 en 29,2 jours (701 h GPU), IC95 % [632, 772].**
+> Le chiffre de 30,9 j annoncé plus haut vient du débit nominal en Gsums/s ;
 > la mesure directe est un peu meilleure. C'est celle qui fait foi.
+>
+> (v6 : 32,2 j / 772 h. La v6.1 est mesurée **appariée** contre la v6, à
+> +10,13 % ± 0,07 sur quatre tours et deux échantillons — §4.9 ; c'est ce
+> rapport qui est fiable, et il est appliqué ici au 772 h de référence. Les
+> valeurs absolues, elles, portent ±8 % : le même binaire v6 mesure 720 h ou
+> 772 h selon l'échantillon et l'état d'horloge de la carte.)
 
 La graine du tirage est **fixe**. Deux GPU différents mesurent donc le même
 échantillon de `vhi` : la comparaison est appariée, et le rapport entre deux
 cartes est bien plus précis que chacune des deux estimations absolues.
 
-| n | v3 | v4 | v5 | **v6** |
-|---|---|---|---|---|
-| 24 | 15,9 min | 9,0 min | 6,6 min | **3,0 min** |
-| 27 | 16,9 h | 9,5 h | 7,0 h | **3,18 h** |
-| 28 | 2,82 j | 1,59 j | 1,17 j | **12,7 h** |
-| **31** | 180,1 j | 101,7 j | 75,0 j | **32,2 j** (mesuré) |
-| 32 | 1,97 an | 1,11 an | 0,82 an | **≈ 129 j** |
+| n | v3 | v4 | v5 | v6 | **v6.1** |
+|---|---|---|---|---|---|
+| 24 | 15,9 min | 9,0 min | 6,6 min | 3,0 min | **2,8 min** (gain mesuré) |
+| 27 | 16,9 h | 9,5 h | 7,0 h | 3,18 h | **≈ 2,95 h** |
+| 28 | 2,82 j | 1,59 j | 1,17 j | 12,7 h | **≈ 11,7 h** |
+| **31** | 180,1 j | 101,7 j | 75,0 j | 32,2 j | **29,2 j** (gain mesuré) |
+| 32 | 1,97 an | 1,11 an | 0,82 an | ≈ 129 j | **≈ 117 j** |
 
-Tout l'état de l'art publié (L(27) + L(28)) se refait en **16 heures** sur cette
-carte.
+Colonne v6.1 : n=24 et n=31 mesurés, les autres obtenus en interpolant le gain
+entre ces deux points (§4.9).
+
+Tout l'état de l'art publié (L(27) + L(28)) se refait en **~14,7 heures** sur
+cette carte.
 
 ### 7.2  Quelle architecture — le modèle, puis la mesure qui le contredit
 
@@ -1208,7 +1508,9 @@ Les briques de plus bas niveau, si besoin :
 **Noyaux de calcul**
 
 * `langford6.cu` — **version de référence** : coordonnées de parité, bitmaps de
-  survie, réflexion reparamétrée, produit en complément à deux
+  survie, réflexion reparamétrée, produit en complément à deux, arbre 160 bits
+  en chaînes de retenue PTX et extraction SWAR par `prmt` (§4.9).
+  `-DK_=<k>` recompile avec un autre découpage `e_lo` ; K=7 est l'optimum mesuré
 * `langford5.cu` — demi-état + déroulage par 8
 * `langford4.cu` — saut des termes nuls par compaction warp
 * `langford3.cu` — Godfrey + groupe de symétries complet

@@ -45,6 +45,24 @@
     : "+r"(z[0]),"+r"(z[1]),"+r"(z[2]),"+r"(z[3]),"+r"(z[4])    \
     : "r"(x[0]),"r"(x[1]),"r"(x[2]),"r"(x[3]),"r"(x[4]))
 
+/* Extraction SIGNEE d'un octet SWAR en UNE instruction.
+ *
+ * `prmt.b32` recopie quatre octets choisis parmi les huit de (a,b) ; quand le
+ * bit 3 d'un selecteur est mis, l'octet de sortie vaut 0x00 ou 0xFF selon le
+ * SIGNE de l'octet choisi.  Un selecteur (8|j,8|j,8|j,j) etend donc l'octet j
+ * en un entier 32 bits signe, seul.
+ *
+ * nvcc ne connait ce motif que pour l'octet 0 ; pour les octets 1 et 2 il
+ * emet decalage + xor + decalage arithmetique, soit 3 instructions au lieu
+ * d'une.  Mesure : 9 instructions par mot SWAR au lieu de 5, sur 4 mots et
+ * pour chaque survivant.                                                    */
+#define SEXTB0 0x8880
+#define SEXTB1 0x9991
+#define SEXTB2 0xAAA2
+#define SEXTB3 0xBBB3
+template<int SEL> __device__ __forceinline__ int sextb(uint32_t d){
+    int r; asm("prmt.b32 %0, %1, 0, %2;" : "=r"(r) : "r"(d), "n"(SEL)); return r; }
+
 /* produit 160 bits des 32 voies SWAR, signe inclus dans la voie 31 */
 __device__ __forceinline__ void prod160(const uint32_t *rr, uint32_t *z, int &neg)
 {
@@ -52,8 +70,8 @@ __device__ __forceinline__ void prod160(const uint32_t *rr, uint32_t *z, int &ne
     #pragma unroll
     for (int k = 0; k < 8; k++) {
         uint32_t d = rr[k] ^ 0x80808080u;
-        int v0=(int)(signed char)(d),      v1=(int)(signed char)(d>>8);
-        int v2=(int)(signed char)(d>>16),  v3=(int)(signed char)(d>>24);
+        int v0=sextb<SEXTB0>(d), v1=sextb<SEXTB1>(d);
+        int v2=sextb<SEXTB2>(d), v3=sextb<SEXTB3>(d);
         p[2*k]=v0*v1; p[2*k+1]=v2*v3;
     }
     int q4[8];
@@ -103,6 +121,74 @@ __device__ __forceinline__ void prod160(const uint32_t *rr, uint32_t *z, int &ne
  * du gaspillage, c'est de la compression de registres.                       */
 
 
+/* ---------------------------------------------------------------------------
+ * Multiplication multi-mots par CHAINES DE RETENUE (mad.lo.cc / madc.hi.cc).
+ *
+ * La formulation naturelle en `uint64_t` -- former les produits partiels
+ * 32x32->64 puis recombiner les moities a la main -- oblige ptxas a
+ * materialiser chaque produit dans une paire de registres, puis a propager les
+ * retenues par des IADD3/IADD3.X separes : ~21 instructions de propagation
+ * pour l'etage final.  Les formes `mad{c}.{lo,hi}.cc` du PTX ABSORBENT
+ * l'addition ET la retenue dans le multiplieur : une IMAD par produit partiel,
+ * zero addition explicite.
+ *
+ * Contrainte : le drapeau de retenue n'est pas modelise par le compilateur.
+ * Chaque chaine doit donc tenir dans UN SEUL bloc asm, et les sorties sont en
+ * "=&r" (earlyclobber) -- sans quoi le repartiteur peut aliaser une sortie
+ * ecrite tot avec une entree relue plus tard dans la chaine.
+ * ------------------------------------------------------------------------- */
+
+/* 64x64 -> 96 bits (tronque), non signe. 7 instructions. */
+__device__ __forceinline__ void mul64_96(uint32_t a0,uint32_t a1,
+                                         uint32_t c0,uint32_t c1,uint32_t*r)
+{
+    asm("{\n\t"
+        "mul.lo.u32     %0, %3, %5;\n\t"
+        "mul.hi.u32     %1, %3, %5;\n\t"
+        "mad.lo.cc.u32  %1, %4, %5, %1;\n\t"
+        "madc.hi.u32    %2, %4, %5, 0;\n\t"
+        "mad.lo.cc.u32  %1, %3, %6, %1;\n\t"
+        "madc.hi.u32    %2, %3, %6, %2;\n\t"
+        "mad.lo.u32     %2, %4, %6, %2;\n\t"
+        "}" : "=&r"(r[0]),"=&r"(r[1]),"=&r"(r[2])
+            : "r"(a0),"r"(a1),"r"(c0),"r"(c1));
+}
+
+/* 96x96 -> 160 bits (tronque), non signe.  Schoolbook ligne par ligne : pour
+ * chaque limbe c_j, une passe sur les moities BASSES puis une passe sur les
+ * HAUTES, chacune sa propre chaine de retenue (les deux ne peuvent pas
+ * s'entrelacer, il n'y a qu'un drapeau).  Les retenues sortant du limbe 4 sont
+ * jetees : c'est la troncature, elle est gratuite.  17 instructions contre
+ * ~30 pour la version uint64_t. */
+__device__ __forceinline__ void mul96_160(const uint32_t*A,const uint32_t*C,uint32_t*z)
+{
+    asm("{\n\t"
+        /* ligne c0 -- accumulateur nul, une seule chaine suffit */
+        "mul.lo.u32     %0, %5,  %8;\n\t"
+        "mul.hi.u32     %1, %5,  %8;\n\t"
+        "mad.lo.cc.u32  %1, %6,  %8, %1;\n\t"
+        "madc.hi.u32    %2, %6,  %8, 0;\n\t"
+        "mad.lo.cc.u32  %2, %7,  %8, %2;\n\t"
+        "madc.hi.u32    %3, %7,  %8, 0;\n\t"
+        /* ligne c1 : moities basses dans z1..z3, la retenue INITIALISE z4 */
+        "mad.lo.cc.u32  %1, %5,  %9, %1;\n\t"
+        "madc.lo.cc.u32 %2, %6,  %9, %2;\n\t"
+        "madc.lo.cc.u32 %3, %7,  %9, %3;\n\t"
+        "addc.u32       %4, 0, 0;\n\t"
+        /* ligne c1 : moities hautes dans z2..z4 */
+        "mad.hi.cc.u32  %2, %5,  %9, %2;\n\t"
+        "madc.hi.cc.u32 %3, %6,  %9, %3;\n\t"
+        "madc.hi.u32    %4, %7,  %9, %4;\n\t"
+        /* ligne c2 : basses dans z2..z4, hautes dans z3..z4 (hi(a2c2) -> z5) */
+        "mad.lo.cc.u32  %2, %5, %10, %2;\n\t"
+        "madc.lo.cc.u32 %3, %6, %10, %3;\n\t"
+        "madc.lo.u32    %4, %7, %10, %4;\n\t"
+        "mad.hi.cc.u32  %3, %5, %10, %3;\n\t"
+        "madc.hi.u32    %4, %6, %10, %4;\n\t"
+        "}" : "=&r"(z[0]),"=&r"(z[1]),"=&r"(z[2]),"=&r"(z[3]),"=&r"(z[4])
+            : "r"(A[0]),"r"(A[1]),"r"(A[2]),"r"(C[0]),"r"(C[1]),"r"(C[2]));
+}
+
 /* Produit 160 bits a entree mixte : 16 ecarts PAIRS en SWAR (4 mots) et les 8
  * produits deja formes des ecarts IMPAIRS.  Les impairs sortent des popcounts
  * en entiers ; les empaqueter en octets pour les re-extraire aussitot coute
@@ -116,8 +202,8 @@ __device__ __forceinline__ void prod160m(const uint32_t *ev, const int *p8,
     #pragma unroll
     for (int k=0;k<4;k++){
         uint32_t d = ev[k] ^ 0x80808080u;
-        int v0=(int)(signed char)(d),     v1=(int)(signed char)(d>>8);
-        int v2=(int)(signed char)(d>>16), v3=(int)(signed char)(d>>24);
+        int v0=sextb<SEXTB0>(d), v1=sextb<SEXTB1>(d);
+        int v2=sextb<SEXTB2>(d), v3=sextb<SEXTB3>(d);
         p[2*k]=v0*v1; p[2*k+1]=v2*v3;
     }
     #pragma unroll
@@ -141,35 +227,18 @@ __device__ __forceinline__ void prod160m(const uint32_t *ev, const int *p8,
         const unsigned long long cu=(unsigned long long)s[2*h+1];
         uint32_t a0=(uint32_t)au, a1=(uint32_t)(au>>32);
         uint32_t c0=(uint32_t)cu, c1=(uint32_t)(cu>>32);
-        uint64_t p00=(uint64_t)a0*c0, p01=(uint64_t)a0*c1, p10=(uint64_t)a1*c0;
-        uint32_t p11=a1*c1;
-        uint64_t m=(p00>>32)+(uint32_t)p01+(uint32_t)p10;
-        uint32_t r0=(uint32_t)p00, r1=(uint32_t)m;
-        uint32_t r2=(uint32_t)((m>>32)+(p01>>32)+(p10>>32)+p11);
-        r2 -= (s[2*h]  <0) ? c0 : 0u;
-        r2 -= (s[2*h+1]<0) ? a0 : 0u;
-        if(h==0){ A[0]=r0; A[1]=r1; A[2]=r2; } else { C[0]=r0; C[1]=r1; C[2]=r2; }
+        uint32_t r[3]; mul64_96(a0,a1,c0,c1,r);
+        r[2] -= (s[2*h]  <0) ? c0 : 0u;
+        r[2] -= (s[2*h+1]<0) ? a0 : 0u;
+        if(h==0){ A[0]=r[0]; A[1]=r[1]; A[2]=r[2]; } else { C[0]=r[0]; C[1]=r[1]; C[2]=r[2]; }
     }
-    {   uint64_t P00=(uint64_t)A[0]*C[0];
-        uint64_t P01=(uint64_t)A[0]*C[1], P10=(uint64_t)A[1]*C[0];
-        uint64_t P02=(uint64_t)A[0]*C[2], P11=(uint64_t)A[1]*C[1], P20=(uint64_t)A[2]*C[0];
-        uint64_t P12=(uint64_t)A[1]*C[2], P21=(uint64_t)A[2]*C[1];
-        uint32_t P22=A[2]*C[2];
-        uint64_t cy,s0;
-        s0=(uint32_t)P00;                                z[0]=(uint32_t)s0;
-        cy=(s0>>32)+(P00>>32);
-        s0=cy+(uint32_t)P01+(uint32_t)P10;               z[1]=(uint32_t)s0;
-        cy=(s0>>32)+(P01>>32)+(P10>>32);
-        s0=cy+(uint32_t)P02+(uint32_t)P11+(uint32_t)P20; z[2]=(uint32_t)s0;
-        cy=(s0>>32)+(P02>>32)+(P11>>32)+(P20>>32);
-        s0=cy+(uint32_t)P12+(uint32_t)P21;               z[3]=(uint32_t)s0;
-        cy=(s0>>32)+(P12>>32)+(P21>>32);
-        z[4]=(uint32_t)(cy+P22);
-        if ((int)A[2]<0){ uint64_t t=(uint64_t)z[3]-(uint64_t)C[0];
-                          z[3]=(uint32_t)t; z[4]-=C[1]+(uint32_t)((t>>63)&1ull); }
-        if ((int)C[2]<0){ uint64_t t=(uint64_t)z[3]-(uint64_t)A[0];
-                          z[3]=(uint32_t)t; z[4]-=A[1]+(uint32_t)((t>>63)&1ull); }
-    }
+    mul96_160(A,C,z);
+    /* correction de signe du dernier etage : -2^96 (s_A.C + s_C.A), tronquee
+     * a 160 bits, donc seulement les limbes 3 et 4.                        */
+    if ((int)A[2]<0){ uint64_t t=(uint64_t)z[3]-(uint64_t)C[0];
+                      z[3]=(uint32_t)t; z[4]-=C[1]+(uint32_t)((t>>63)&1ull); }
+    if ((int)C[2]<0){ uint64_t t=(uint64_t)z[3]-(uint64_t)A[0];
+                      z[3]=(uint32_t)t; z[4]-=A[1]+(uint32_t)((t>>63)&1ull); }
 }
 
 /* autocorrelation de rangee, lag m, sur N cellules */
@@ -231,10 +300,15 @@ void oe_kernel(uint32_t vhi0, uint32_t vcnt, uint32_t blk0, uint32_t * __restric
     const int W  = NL/32;              /* mots par tranche       */
     const int WP = W+1;                /* +1 : anti-conflit banc */
     const int NS = ME*(N+1);           /* tranches de bitmap     */
+    /* Les R(m) constants (4.5) : un par ecart impair m = K+1..MO, empaquetes
+     * deux par mot.  Ce compte etait code en dur a 4 -- exact pour n=31 et
+     * K=7, et pour eux seuls : a K=6 il en faut 5, et l'ecriture du mot
+     * d'indice 9 debordait sur sQ, la file des survivants (acces illegal). */
+    const int NRC = (MO > K) ? ((MO-K)+1)/2 : 0;
 
     __shared__ uint32_t sT[NL][5];   /* stride 5 : anti-conflit de bancs */     /* Q(e) empaquete SWAR, biais 64 */
     __shared__ uint32_t sB[NS*WP];     /* bitmaps par (lag, valeur)     */
-    __shared__ uint32_t sPw[256][9]; /* +4 mots : les R(m) constants */   /* P(o) de chaque thread         */
+    __shared__ uint32_t sPw[256][5+NRC]; /* [0..3] P(o), [4] o, [5..] R(m) constants */
     __shared__ uint32_t sQ[8][64];     /* file des survivants, par warp */
 
     const int tid = threadIdx.x;
@@ -439,13 +513,35 @@ static void print_i160(u160 v){ if(v.w[4]&0x80000000u){ putchar('-'); uint64_t c
         for(int k=0;k<5;k++){ uint64_t s=(uint64_t)(~v.w[k])+c; v.w[k]=(uint32_t)s; c=s>>32; } }
     print_u160(v); }
 
+/* Les b bits de poids faible sont-ils nuls ? (0 <= b <= 160) */
+static int h_low_zero(const u160*x,int b){
+    for(int k=0;k<b;k++) if((x->w[k>>5]>>(k&31))&1) return 0;
+    return 1; }
+
+/* Valuation 2-adique GARANTIE de toute somme partielle.  Chaque terme est un
+ * produit des n facteurs A_i, i = 2..n+1, et A_i = i (mod 2) : les ecarts
+ * PAIRS donnent donc chacun un facteur 2, et il y en a floor((n+1)/2).  Toute
+ * somme de tels termes est divisible par 2^E(n) -- c'est un auto-test par
+ * TACHE, disponible immediatement, la ou la divisibilite par 2^{2n} ne vaut
+ * que pour le total assemble.  Mesure : les tranches n=31 deja rendues sortent
+ * a v2 >= 24, soit 8 bits de marge sur les 16 garantis.                     */
+static int even_gaps(int N){ return (N+1)/2; }
+static int part_ok(const u160*x,int N,const char*what){
+    if(h_low_zero(x,even_gaps(N))) return 1;
+    fprintf(stderr,"*** AUTO-TEST ECHOUE (%s) : somme partielle non divisible "
+                   "par 2^%d ***\n",what,even_gaps(N));
+    fprintf(stderr,"    tranche corrompue -- a rejouer, ne pas l'agreger\n");
+    return 0; }
+
 typedef void (*kern_t)(uint32_t,uint32_t,uint32_t,uint32_t*);
 typedef void (*dker_t)(uint32_t*);
 #define DINST(NN) case NN: return (dker_t)diag_kernel<NN>;
 static dker_t dpick(int N){ switch(N){
     DINST(11) DINST(12) DINST(15) DINST(16) DINST(19) DINST(20) DINST(23) DINST(24)
     DINST(27) DINST(28) DINST(31) default: return NULL; } }
-#define K_ 7
+#ifndef K_
+#define K_ 7          /* balaye : cf. README 4.5 */
+#endif
 #define INST(NN) case NN: return (kern_t)oe_kernel<NN,K_>;
 static kern_t pick(int N){ switch(N){
     INST(11) INST(12) INST(15) INST(16) INST(19) INST(20) INST(23) INST(24)
@@ -478,16 +574,26 @@ int main(int argc,char**argv){
                 if(ln[0]=='\n'||ln[0]==0) continue;
                 if(sscanf(ln,"%8x:%8x:%8x:%8x:%8x",&x.w[4],&x.w[3],&x.w[2],&x.w[1],&x.w[0])!=5){
                     fprintf(stderr,"partiel illisible ligne %lld : %s",nread+1,ln); fclose(fp); return 1; }
+                if(!part_ok(&x,N,"partielle lue")){
+                    fprintf(stderr,"    ligne %lld de %s\n",nread+1,mfile); fclose(fp); return 1; }
                 h_add(&t,&x); nread++; }
             fclose(fp);
             fprintf(stderr,"%lld tranches lues depuis %s\n",nread,mfile); }
         for(int i=merge;merge&&i<argc;i++){ u160 x;
             if(sscanf(argv[i],"%8x:%8x:%8x:%8x:%8x",&x.w[4],&x.w[3],&x.w[2],&x.w[1],&x.w[0])!=5){
                 fprintf(stderr,"partiel illisible : %s\n",argv[i]); return 1; }
+            if(!part_ok(&x,N,"partielle lue")){
+                fprintf(stderr,"    argument : %s\n",argv[i]); return 1; }
             h_add(&t,&x); }
         h_shl2(&t);
-        int ok=1; for(int b=0;b<2*N;b++) if((t.w[b>>5]>>(b&31))&1) ok=0;
-        if(!ok){ fprintf(stderr,"*** AUTO-TEST ECHOUE : non divisible par 2^%d ***\n",2*N);
+        /* 2n+1 et non 2n : le total vaut 2^{2n}.V(n) et V(n) = 2.L(2,n) est
+         * PAIR, car aucun appariement de Langford n'est son propre miroir
+         * (il faudrait 2p = 2n-k pour tout k, impossible des que k est impair).
+         * Un bit de controle gratuit de plus, et surtout un V impair -- qui
+         * serait tronque en silence par le >>1 ci-dessous -- devient une
+         * erreur au lieu d'un resultat faux.                                */
+        int ok=1; for(int b=0;b<2*N+1;b++) if((t.w[b>>5]>>(b&31))&1) ok=0;
+        if(!ok){ fprintf(stderr,"*** AUTO-TEST ECHOUE : non divisible par 2^%d ***\n",2*N+1);
                  fprintf(stderr,"    (tranche manquante, dupliquee, ou corrompue)\n"); return 1; }
         u160 v; memset(&v,0,sizeof v);
         for(int b=2*N;b<160;b++) if((t.w[b>>5]>>(b&31))&1) v.w[(b-2*N)>>5]|=1u<<((b-2*N)&31);
@@ -574,6 +680,7 @@ int main(int argc,char**argv){
         dker_t Dk=dpick(N); Dk<<<blocks,256>>>(d_out); CHECK(cudaGetLastError());
         CHECK(cudaMemcpy(h_out,d_out,(size_t)blocks*5*4,cudaMemcpyDeviceToHost));
         for(int q=0;q<blocks;q++) h_add(&total,(u160*)(h_out+5*q));
+        if(!part_ok(&total,N,"diagonale")) return 1;
         printf("PART=%08x:%08x:%08x:%08x:%08x   (diagonale n=%d)\n",
                total.w[4],total.w[3],total.w[2],total.w[1],total.w[0],N);
         return 0; }
@@ -603,8 +710,9 @@ int main(int argc,char**argv){
 
     if(from==0&&done==nvhi){
         h_shl2(&total);                          /* x4 : groupe de Klein */
-        int ok=1; for(int b=0;b<2*N;b++) if((total.w[b>>5]>>(b&31))&1) ok=0;
-        if(!ok){ fprintf(stderr,"*** AUTO-TEST ECHOUE : non divisible par 2^%d ***\n",2*N); return 1; }
+        /* 2n+1 : cf. --merge, V(n) = 2.L(2,n) est pair. */
+        int ok=1; for(int b=0;b<2*N+1;b++) if((total.w[b>>5]>>(b&31))&1) ok=0;
+        if(!ok){ fprintf(stderr,"*** AUTO-TEST ECHOUE : non divisible par 2^%d ***\n",2*N+1); return 1; }
         u160 v; memset(&v,0,sizeof v);
         for(int b=2*N;b<160;b++) if((total.w[b>>5]>>(b&31))&1) v.w[(b-2*N)>>5]|=1u<<((b-2*N)&31);
         printf("n=%d   V(n) = 2*L(2,n) = ",N); print_u160(v); printf("\n");
@@ -612,6 +720,9 @@ int main(int argc,char**argv){
         for(int q=4;q>=0;q--){ uint32_t x=v.w[q]; h.w[q]=(x>>1)|(c<<31); c=x&1; }
         printf("n=%d   L(2,%d)         = ",N,N); print_u160(h); printf("\n");
     } else {
+        /* auto-test par tache : la tranche est rejetee ici, sur la machine qui
+         * l'a produite, au lieu d'etre decouverte a l'agregation finale.     */
+        if(!part_ok(&total,N,"tranche")) return 1;
         printf("PART=%08x:%08x:%08x:%08x:%08x   (n=%d vhi %lld..%lld)\n",
                total.w[4],total.w[3],total.w[2],total.w[1],total.w[0],N,from,from+done-1);
     }

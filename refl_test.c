@@ -44,7 +44,9 @@ static __int128 term(uint64_t b){
 }
 
 int main(int argc, char **argv){
+    if(argc < 2){ fprintf(stderr,"usage: %s <n>\n", argv[0]); return 1; }
     n = atoi(argv[1]); M = 2*n;
+    if(n < 3 || n > 16){ fprintf(stderr,"n hors domaine (3..16)\n"); return 1; }
     FULLM = (M >= 64) ? ~0ULL : ((1ULL<<M)-1);
     ALT = 0; for (int p = 1; p < M; p += 2) ALT |= 1ULL<<p;
 

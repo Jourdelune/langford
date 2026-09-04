@@ -182,6 +182,19 @@ def lease(c, worker, k, secs):
         c.execute("COMMIT")
     return ids
 
+def part_ok(part, n):
+    """Auto-test par tache.  Chaque terme de la somme est un produit des n
+    facteurs A_i (i = 2..n+1) et A_i = i (mod 2), donc les floor((n+1)/2)
+    ecarts PAIRS donnent chacun un facteur 2 : toute somme partielle est
+    divisible par 2^E(n).  Une tranche corrompue est ainsi rejetee a l'arrivee
+    -- son bail expire et elle repart au pot -- au lieu de n'etre vue qu'a
+    l'agregation finale, apres des semaines de calcul."""
+    try:
+        v = int(part.replace(":", ""), 16)
+    except ValueError:
+        return False
+    return len(part) == 44 and v % (1 << ((n + 1) // 2)) == 0
+
 def finish(c, tid, part, secs, worker):
     with LOCK:
         c.execute("UPDATE tasks SET status='done', part=?, secs=?, worker=? WHERE id=?",
@@ -273,6 +286,9 @@ def worker_loop(w, n, T):
             for line in p.stdout:                      # au fil de l'eau : une
                 f = line.split()                       # coupure ne perd que la
                 if len(f) == 2 and f[0] != "ERR":      # tache en cours
+                    if not part_ok(f[1], n):           # rejetee : le bail
+                        log(f"{w['name']} : tache {f[0]} REJETEE ({f[1]})")
+                        continue                       # expire, elle repart
                     finish(c, f[0], f[1], (time.time() - t0) / max(got + 1, 1), w["name"])
                     got += 1
             p.wait(timeout=60)

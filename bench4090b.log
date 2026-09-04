@@ -1,0 +1,13 @@
+SSH ssh8.vast.ai:19210
+--- carte au repos ---
+NVIDIA GeForce RTX 4090, 1 MiB, 0 %
+n=12   L(2,12)         = 108144
+--- travail identique (4070 : 50.24 / 11.20 / 9.20 s ; 5090 : 16.92 / 3.68 / 3.26 s) ---
+  vhi=0 count=24 : 18.94 s
+  vhi=2000000 count=24 : 4.43 s
+  vhi=5000000 count=40 : 3.65 s
+--- bench apparie (4070 713 h | 5090 227,7 h) ---
+echantillon: 96 vhi (graine fixe)  moyenne 0.1145 s/vhi  err-std 6.6%
+PROJECTION n=31 : 266.9 h GPU = 11.12 jours   (IC95% 231.7 .. 302.0 h)
+BENCH_SPV=0.114520  BENCH_GPUH=266.85
+FINI
