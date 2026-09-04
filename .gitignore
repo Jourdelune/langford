@@ -1,0 +1,28 @@
+# binaires compiles
+langford
+langford2
+langford3
+langford4
+langford5
+langford6
+langford_ref
+find_langford
+estimate
+parity
+refl_test
+pfaff_test
+pfaff_zk
+dpstates
+fiber
+zfrac
+oe_check
+oe_ref
+oe_ref2
+*.o
+*.sass
+
+# journaux de run et sorties partielles
+val*.txt
+part*.txt
+*.ckpt
+c31*
