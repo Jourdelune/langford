@@ -1,0 +1,9 @@
+worker 0 : tache 0/8 faite  (2 au total)
+worker 0 : tache 1/8 faite  (3 au total)
+worker 0 : tache 2/8 faite  (4 au total)
+worker 0 : tache 3/8 faite  (5 au total)
+worker 0 : tache 4/8 faite  (6 au total)
+worker 0 : tache 5/8 faite  (7 au total)
+worker 0 : tache 6/8 faite  (8 au total)
+worker 0 : tache 7/8 faite  (9 au total)
+worker 0 termine

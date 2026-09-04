@@ -945,9 +945,24 @@ la 4090 (29 $ contre 30 $) tout en allant 1,42× plus vite. Une H100 coûterait
 
 Temps de calendrier en louant plusieurs 5090 spot — le coût reste ~29 $ :
 
-| 5090 en parallèle | 1 | 4 | 8 | 16 | 32 |
+| 5090 en parallèle | 1 | 4 | **8** | 16 | 32 |
 |---|---|---|---|---|---|
-| calendrier | 8,0 j | 2,0 j | 24 h | 12 h | 6 h |
+| calendrier | 8,0 j | 2,0 j | **24 h** | 12 h | 6 h |
+
+**Huit instances séparées, pas un nœud 8×.** Pour la même durée de 24 h :
+
+| montage | $/GPU/h | **total** |
+|---|---|---|
+| 8 instances spot séparées | 0,15 | **29 $** |
+| 8 instances à la demande | 0,33 | 63 $ |
+| un seul nœud 8×5090 (256 vCPU, 504 Go) | 0,60 | **115 $** |
+
+Le nœud multi-GPU coûte **4× le prix** pour exactement le même calcul. La prime
+paie un interconnect (NVLink, PCIe entre cartes, RAM partagée) dont ce travail
+n'a strictement aucun usage : zéro communication entre workers, 40 octets de
+sortie par tâche. Elle n'a de sens que pour la commodité — une seule machine à
+configurer, un seul `parts_n31.txt`, `collect.sh` en local. À 86 $ d'écart,
+`run_node.sh` rend le montage à 8 instances assez simple pour ne pas la payer.
 
 ### 7.4  Plan recommandé
 
@@ -957,8 +972,20 @@ Temps de calendrier en louant plusieurs 5090 spot — le coût reste ~29 $ :
    de `vhi` que la 4070. Tout le reste du budget en découle.
 2. Choisir le nombre de workers selon le temps voulu, puis lancer
    `./worker.sh <i> <W> 31 4096` sur chacun (4096 tâches ≈ 2,8 min chacune sur
-   une 5090).
+   une 5090 ; avec 8 cartes, 512 tâches par carte).
 3. Rassembler avec `./collect.sh 31 4096 parts_*.txt`.
+
+Sur un nœud multi-GPU, `./run_node.sh 31 4096` lance un worker par carte.
+**C'est indispensable** : le code prend le device 0 par défaut, donc sans
+répartition explicite les 8 processus se battraient pour la carte 0 et les sept
+autres resteraient inutilisées — sur un nœud facturé à l'heure, 7/8 du loyer
+jeté. `run_node.sh` isole chaque worker par `CUDA_VISIBLE_DEVICES` ;
+`--dev <i>` fait la même chose depuis le binaire.
+
+Comparer deux cartes demande le **même nombre d'échantillons** des deux côtés
+(la graine est fixe, donc `--bench 64` et `--bench 48` ne tirent pas le même
+ensemble). Avec 64 tirages l'erreur-type est de ~8 % ; pour un chiffre absolu
+serré, prendre `--bench 256`.
 
 **Le spot est le bon choix ici**, alors qu'il est risqué pour un entraînement :
 
@@ -1052,6 +1079,7 @@ arrêté. Les briques de plus bas niveau, si besoin :
   installé ne connaît pas (Blackwell exige CUDA ≥ 12.8)
 * `run_shard.sh` — une tâche, découpée à charge égale (§7.5)
 * `worker.sh` — un worker sur une machine louée, reprise après préemption
+* `run_node.sh` — un nœud multi-GPU : un worker par carte
 * `collect.sh` — vérifie complétude et absence de doublons, puis conclut
 
 **Vérification et théorie**

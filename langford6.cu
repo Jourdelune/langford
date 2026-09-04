@@ -448,12 +448,13 @@ static kern_t pick(int N){ switch(N){
     INST(27) INST(28) INST(31) default: return NULL; } }
 
 int main(int argc,char**argv){
-    int N=15; long long from=0,count=-1; int chunk=16, diagonly=0, merge=0, bench=0;
+    int N=15; long long from=0,count=-1; int chunk=16, diagonly=0, merge=0, bench=0, dev=-1;
     for(int i=1;i<argc;i++){
         if(!strcmp(argv[i],"-n")) N=atoi(argv[++i]);
         else if(!strcmp(argv[i],"--from")) from=atoll(argv[++i]);
         else if(!strcmp(argv[i],"--count")) count=atoll(argv[++i]);
         else if(!strcmp(argv[i],"--chunk")) chunk=atoi(argv[++i]);
+        else if(!strcmp(argv[i],"--dev")) dev=atoi(argv[++i]);
         else if(!strcmp(argv[i],"--diag")) diagonly=1;
         else if(!strcmp(argv[i],"--bench")) bench=(i+1<argc&&argv[i+1][0]!='-')?atoi(argv[++i]):64;
         else if(!strcmp(argv[i],"--merge")) { merge=i+1; break; }
@@ -478,6 +479,8 @@ int main(int argc,char**argv){
         for(int q=4;q>=0;q--){ uint32_t x=v.w[q]; h.w[q]=(x>>1)|(c<<31); c=x&1; }
         printf("n=%d   L(2,%d)         = ",N,N); print_u160(h); printf("\n");
         return 0; }
+
+    if(dev>=0) CHECK(cudaSetDevice(dev));   /* noeud multi-GPU : un worker par carte */
 
     const int FREE = N-1;                       /* bits libres par rangee */
     if (FREE < K_ || FREE < 8){ fprintf(stderr,"n trop petit pour ce decoupage\n"); return 1; }
@@ -548,7 +551,7 @@ int main(int argc,char**argv){
         int nb = blocks-(int)b0; if(nb<=0){ done+=c; continue; }
         Kf<<<nb,256>>>((uint32_t)s,(uint32_t)c,(uint32_t)b0,d_out);
         CHECK(cudaGetLastError());
-        CHECK(cudaMemcpy(h_out,d_out,(size_t)blocks*5*4,cudaMemcpyDeviceToHost));
+        CHECK(cudaMemcpy(h_out,d_out,(size_t)nb*5*4,cudaMemcpyDeviceToHost));
         for(int q=0;q<nb;q++) h_add(&total,(u160*)(h_out+5*q));
         done+=c;
     }
