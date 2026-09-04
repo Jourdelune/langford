@@ -48,10 +48,28 @@ STOP   = threading.Event()
 def log(*a): print(time.strftime("%H:%M:%S"), *a, flush=True)
 
 # --------------------------------------------------------------- vast.ai API
+def env_get(k):
+    try: f = open(os.path.join(HERE, ".env"))
+    except FileNotFoundError: return None
+    for line in f:
+        if line.startswith(k + "="): return line.split("=", 1)[1].strip()
+    return None
+
+def env_set(k, v):
+    p = os.path.join(HERE, ".env")
+    lines = [l for l in (open(p).read().splitlines() if os.path.exists(p) else [])
+             if not l.startswith(k + "=")]
+    lines.append(f"{k}={v}")
+    fd = os.open(p, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f: f.write("\n".join(lines) + "\n")
+
 def api_key():
-    for line in open(os.path.join(HERE, ".env")):
-        if line.startswith("VAST_API_KEY="): return line.split("=", 1)[1].strip()
-    sys.exit(".env : VAST_API_KEY absent")
+    """Sur un compte protege par 2FA, la cle API ne donne AUCUN privilege a elle
+    seule : il faut l'echanger contre une session_key en presentant un code TOTP
+    (cf. cmd_tfa). C'est cette session_key qu'on utilise si elle existe."""
+    k = env_get("VAST_SESSION_KEY") or env_get("VAST_API_KEY")
+    if not k: sys.exit(".env : ni VAST_SESSION_KEY ni VAST_API_KEY")
+    return k
 
 def api(method, path, body=None, auth=True):
     req = urllib.request.Request(API + path, method=method,
@@ -64,7 +82,13 @@ def api(method, path, body=None, auth=True):
         txt = e.read().decode()[:300]
         if e.code == 401 and "Two Factor" in txt:
             sys.exit(
-                "\n*** Le compte vast.ai bloque tous les appels authentifies.\n"
+                "\n*** Session 2FA requise.  Sur un compte protege par 2FA, la cle\n"
+                "    API ne donne aucun privilege a elle seule : il faut l'echanger\n"
+                "    contre une session_key en presentant un code TOTP.\n\n"
+                "        ./orchestrator.py tfa --code 123456\n\n"
+                "    (code a 6 chiffres de l'application d'authentification, ou\n"
+                "     ./orchestrator.py tfa --backup ABCD-EFGH-IJKL)\n\n"
+                "*** ancien diagnostic, conserve pour memoire :\n"
                 "    Constate sur instances/, machines/, invoices/, users/current/,\n"
                 "    team/members/ ET tfa/status/ : erreur identique partout, avec\n"
                 "    trois cles differentes. Ce n'est donc ni la cle ni son scope,\n"
@@ -315,6 +339,34 @@ def cmd_up(a):
         made += 1
     log(f"{made} instance(s) creee(s)")
 
+def cmd_tfa(a):
+    """Echange un code a 6 chiffres contre une session_key elevee.
+    Un code ne vaut que ~30 s : avoir la commande prete evite de le rater.
+
+    --send sms|email demande d'abord l'envoi du code et affiche le `secret`
+    qu'il faut ensuite repasser avec le code (le TOTP, lui, n'en a pas besoin)."""
+    if a.send:
+        r = api("POST", f"tfa/{a.send}/", {})
+        sec = r.get("secret") or r.get("tfa_secret")
+        log(f"code envoye par {a.send}. Puis :")
+        log(f"  ./orchestrator.py tfa --method {a.send} --secret {sec} --code <CODE>")
+        return
+    if a.backup:      body = {"backup_code": a.backup}
+    else:             body = {"tfa_method": a.method, "code": str(a.code)}
+    if a.secret:      body["secret"] = a.secret
+    if a.method_id:   body["tfa_method_id"] = a.method_id
+    r = api("POST", "tfa/", body)
+    sk = r.get("session_key")
+    if not sk: sys.exit(f"pas de session_key dans la reponse : {str(r)[:200]}")
+    env_set("VAST_SESSION_KEY", sk)
+    log("session 2FA obtenue, ecrite dans .env (VAST_SESSION_KEY)")
+    left = r.get("backup_codes_remaining")
+    if left is not None: log(f"codes de secours restants : {left}")
+    try:
+        n = len(api("GET", "instances/").get("instances", []))
+        log(f"verification : l'API repond, {n} instance(s) sur le compte")
+    except SystemExit as e: log(f"verification : {e}")
+
 def cmd_sshkey(a):
     pub = ensure_key()
     print("Cle publique de l'orchestrateur -- a coller dans la console vast.ai\n"
@@ -429,6 +481,12 @@ def main():
     q = S.add_parser("plan");   q.add_argument("--hours", type=float, default=10); q.add_argument("--ratio", type=float, default=4.02); q.add_argument("--base", type=float, default=772); q.set_defaults(f=cmd_plan)
     q = S.add_parser("offers"); q.add_argument("--count", type=int, default=12); q.add_argument("--bid", action="store_true"); q.set_defaults(f=cmd_offers)
     q = S.add_parser("up");     q.add_argument("--count", type=int, required=True); q.add_argument("--bid", type=float, default=0); q.add_argument("--max-price", type=float, default=0.40); q.set_defaults(f=cmd_up)
+    q = S.add_parser("tfa")
+    q.add_argument("--code"); q.add_argument("--backup"); q.add_argument("--secret")
+    q.add_argument("--method", default="totp", choices=["totp", "sms", "email"])
+    q.add_argument("--method-id", dest="method_id")
+    q.add_argument("--send", choices=["sms", "email"], help="faire envoyer le code d'abord")
+    q.set_defaults(f=cmd_tfa)
     q = S.add_parser("sshkey"); q.set_defaults(f=cmd_sshkey)
     q = S.add_parser("add");    q.add_argument("--ssh"); q.add_argument("--host"); q.add_argument("--port", type=int); q.add_argument("--name"); q.add_argument("--price", type=float, default=0.35); q.set_defaults(f=cmd_add)
     q = S.add_parser("bench"); q.add_argument("--samples", type=int, default=96); q.set_defaults(f=cmd_bench)
