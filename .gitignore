@@ -32,3 +32,16 @@ val*.txt
 part*.txt
 *.ckpt
 c31*
+
+# secrets -- ne doit jamais partir dans un commit
+.env
+.env.*
+state.db
+state.db-*
+log_gpu*.txt
+parts_n*.txt
+vast_*.json
+.run.lock
+.ssh_orch
+.ssh_orch.pub
+parts_merge.txt

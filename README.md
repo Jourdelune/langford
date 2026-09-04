@@ -1017,6 +1017,59 @@ découpe à **charge** égale en inversant la charge cumulée `v·NV − v²/2` 
 
     v_i = NV · (1 − √(1 − i/T))
 
+### 7.6  Orchestration : louer, distribuer, reprendre
+
+`orchestrator.py` pilote un calcul complet depuis la machine locale. Trois
+contraintes ont dicté la conception.
+
+**Le maître initie toutes les connexions.** Une machine domestique est derrière
+un NAT : les instances louées ne peuvent pas l'appeler. Le maître pousse donc le
+travail par SSH, et la clé publique est injectée à la création via le script
+`onstart` de vast.ai — ce qui évite d'avoir à gérer des clés au niveau du compte.
+
+**L'état survit à tout.** SQLite en `journal_mode=WAL` + `synchronous=FULL`, et
+chaque résultat est validé dès son arrivée — pas à la fin d'un lot. Un `kill -9`
+du maître ne coûte que les tâches en vol. Au redémarrage, comme le maître est le
+*seul* distributeur (verrou `flock`), on sait que rien ne tourne : les baux
+hérités sont libérés immédiatement au lieu d'attendre leur expiration.
+
+**Le travail est distribué par baux, pas par tranches fixes.** Un worker
+demande un lot, on le lui réserve pour une durée bornée. S'il ne rend rien à
+temps — préemption spot, machine perdue, SSH coupé — le bail expire et le lot
+retourne au pot. Aucune tâche ne peut être définitivement perdue, et un worker
+lent ne bloque personne. Le lot est dimensionné d'après le débit *mesuré* de
+chaque worker pour durer ~6 min, et `run_batch.sh` émet chaque résultat au fil
+de l'eau : une coupure ne perd jamais plus que la tâche en cours.
+
+La 4070 locale est un worker comme les autres, simplement sans SSH.
+
+```sh
+./orchestrator.py init -n 31 -T 8192     # 8192 tâches à charge égale
+./orchestrator.py plan --hours 10        # combien de 5090 pour tenir en 10 h
+./orchestrator.py offers                 # le marché en direct
+./orchestrator.py up --count 19          # louer (ou --bid 0.25 pour du spot)
+./orchestrator.py bench                  # mesurer le vrai rapport 5090/4070
+./orchestrator.py run                    # boucle principale, reprenable
+./orchestrator.py status                 # avancement, par worker
+./orchestrator.py merge                  # somme + auto-test + réponse
+./orchestrator.py down                   # tout détruire
+```
+
+**Ce qui est vérifié et ce qui ne l'est pas.** Le cœur — découpage, baux,
+reprise après `kill -9`, dispatch multi-worker, agrégation — est validé de bout
+en bout sur n=20 et n=24, résultats exacts. En revanche `up`, `down` et le
+provisionnement SSH n'ont **jamais pu s'exécuter** : la clé API disponible
+renvoie 401 sur tout endpoint authentifié (vast.ai exige une clé créée depuis
+une session 2FA ; seule la recherche d'offres est publique). Ce chemin est donc
+écrit mais non testé contre l'API réelle.
+
+**Rendre la clé utilisable** : se reconnecter sur cloud.vast.ai *via la 2FA*,
+page Keys → +New (full-access par défaut), puis remplacer la valeur dans `.env`.
+Activer la 2FA ne débloque pas rétroactivement une clé créée avant.
+
+`.env` est en `chmod 600` et exclu par `.gitignore`, comme `state.db`, la paire
+de clés SSH générée et les sommes partielles.
+
 ---
 
 ## 8. Utilisation
@@ -1038,12 +1091,14 @@ découpe à **charge** égale en inversant la charge cumulée `v·NV − v²/2` 
 ```
 
 Rejouer la même commande après une préemption reprend où le worker s'était
-arrêté. Les briques de plus bas niveau, si besoin :
+arrêté. Pour un calcul piloté de bout en bout, voir `orchestrator.py` (§7.6).
+Les briques de plus bas niveau, si besoin :
 
 ```sh
 ./run_shard.sh 17 4096 31        # une tâche isolée -> ligne PART=...
 ./langford6 -n 31 --diag         # les orbites fixes (une seule fois)
 ./langford6 -n 31 --merge <PART...>   # somme + auto-test de divisibilité
+./langford6 -n 31 --merge-file f.txt  # idem, depuis un fichier (>1000 tranches)
 ```
 
 **Vérification et théorie**
@@ -1080,6 +1135,9 @@ arrêté. Les briques de plus bas niveau, si besoin :
 * `run_shard.sh` — une tâche, découpée à charge égale (§7.5)
 * `worker.sh` — un worker sur une machine louée, reprise après préemption
 * `run_node.sh` — un nœud multi-GPU : un worker par carte
+* `run_batch.sh` — exécute un lot de tâches, émet chaque résultat au fil de l'eau
+* `orchestrator.py` — location vast.ai, distribution par baux, état SQLite
+  reprenable (§7.6)
 * `collect.sh` — vérifie complétude et absence de doublons, puis conclut
 
 **Vérification et théorie**

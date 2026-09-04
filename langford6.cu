@@ -448,7 +448,7 @@ static kern_t pick(int N){ switch(N){
     INST(27) INST(28) INST(31) default: return NULL; } }
 
 int main(int argc,char**argv){
-    int N=15; long long from=0,count=-1; int chunk=16, diagonly=0, merge=0, bench=0, dev=-1;
+    int N=15; long long from=0,count=-1; int chunk=16, diagonly=0, merge=0, bench=0, dev=-1; const char*mfile=0;
     for(int i=1;i<argc;i++){
         if(!strcmp(argv[i],"-n")) N=atoi(argv[++i]);
         else if(!strcmp(argv[i],"--from")) from=atoll(argv[++i]);
@@ -458,13 +458,26 @@ int main(int argc,char**argv){
         else if(!strcmp(argv[i],"--diag")) diagonly=1;
         else if(!strcmp(argv[i],"--bench")) bench=(i+1<argc&&argv[i+1][0]!='-')?atoi(argv[++i]):64;
         else if(!strcmp(argv[i],"--merge")) { merge=i+1; break; }
+        else if(!strcmp(argv[i],"--merge-file")) mfile=argv[++i];
         else { fprintf(stderr,"unknown arg %s\n",argv[i]); return 1; } }
 
     /* --merge : additionne des sommes partielles hexadecimales et conclut.
      * Chaque tranche distribuee (y compris --diag) sort une ligne PART=...   */
-    if(merge){
-        u160 t; memset(&t,0,sizeof t);
-        for(int i=merge;i<argc;i++){ u160 x; 
+    if(merge||mfile){
+        u160 t; memset(&t,0,sizeof t); long long nread=0;
+        /* --merge-file : indispensable des que le nombre de tranches depasse ce
+         * qu'une ligne de commande peut porter (8192 tranches ~ 370 Ko d'argv). */
+        if(mfile){
+            FILE*fp=fopen(mfile,"r"); if(!fp){ perror(mfile); return 1; }
+            char ln[128];
+            while(fgets(ln,sizeof ln,fp)){ u160 x;
+                if(ln[0]=='\n'||ln[0]==0) continue;
+                if(sscanf(ln,"%8x:%8x:%8x:%8x:%8x",&x.w[4],&x.w[3],&x.w[2],&x.w[1],&x.w[0])!=5){
+                    fprintf(stderr,"partiel illisible ligne %lld : %s",nread+1,ln); fclose(fp); return 1; }
+                h_add(&t,&x); nread++; }
+            fclose(fp);
+            fprintf(stderr,"%lld tranches lues depuis %s\n",nread,mfile); }
+        for(int i=merge;merge&&i<argc;i++){ u160 x;
             if(sscanf(argv[i],"%8x:%8x:%8x:%8x:%8x",&x.w[4],&x.w[3],&x.w[2],&x.w[1],&x.w[0])!=5){
                 fprintf(stderr,"partiel illisible : %s\n",argv[i]); return 1; }
             h_add(&t,&x); }
