@@ -18,6 +18,12 @@ zfrac
 oe_check
 oe_ref
 oe_ref2
+single
+powersums
+framework
+struct
+toeplitz
+partial
 *.o
 *.sass
 

@@ -862,32 +862,166 @@ constantes et des résultats négatifs.
 
 ---
 
-## 7. Budget pour n=31
+## 7. Budget pour n=31, et sur quelle carte
 
-Débit effectif mesuré : 392,7 Gsums/s (2^{2n−2} points nominaux).
+### 7.1  Ce qui est mesuré, et comment
+
+Le coût d'une valeur de `vhi` varie d'un facteur **409** entre la plus rapide et
+la plus lente (144 tirages) : l'élagage par les bitmaps de survie dépend du motif
+de bits, pas de la magnitude. Trois points choisis à la main donnent donc
+n'importe quoi — c'est exactement le piège de mesure n° 4 du §4.7. Le seul
+estimateur honnête est un **tirage uniforme** de `vhi`, ce que fait `--bench` :
+
+```
+$ ./langford6 -n 31 --bench 64
+GPU        : NVIDIA GeForce RTX 4070  (46 SM, sm_89, 2505 MHz)
+echantillon: 64 vhi (graine fixe)  moyenne 0.3338 s/vhi  err-std 8.0%
+PROJECTION n=31 : 777.7 h GPU = 32.40 jours   (IC95% 653.6 .. 901.8 h)
+```
+
+Contrôle : un échantillon hors-ligne de 144 tirages donne 772 h (IC95 %
+696–850). Les deux méthodes concordent à 0,8 %.
+
+> **RTX 4070 : n=31 en 32,2 jours (772 h GPU), IC95 % [696, 850].**
+> Le chiffre de 34,0 j annoncé plus haut venait du débit nominal en Gsums/s ;
+> la mesure directe est un peu meilleure. C'est celle qui fait foi.
+
+La graine du tirage est **fixe**. Deux GPU différents mesurent donc le même
+échantillon de `vhi` : la comparaison est appariée, et le rapport entre deux
+cartes est bien plus précis que chacune des deux estimations absolues.
 
 | n | v3 | v4 | v5 | **v6** |
 |---|---|---|---|---|
 | 24 | 15,9 min | 9,0 min | 6,6 min | **3,0 min** |
 | 27 | 16,9 h | 9,5 h | 7,0 h | **3,18 h** |
 | 28 | 2,82 j | 1,59 j | 1,17 j | **12,7 h** |
-| **31** | 180,1 j | 101,7 j | 75,0 j | **≈ 34,0 j** |
-| 32 | 1,97 an | 1,11 an | 0,82 an | **≈ 136 j** |
+| **31** | 180,1 j | 101,7 j | 75,0 j | **32,2 j** (mesuré) |
+| 32 | 1,97 an | 1,11 an | 0,82 an | **≈ 129 j** |
 
 Tout l'état de l'art publié (L(27) + L(28)) se refait en **16 heures** sur cette
 carte.
+
+### 7.2  Quelle architecture, et pourquoi
+
+Le drain du noyau exécute **161 instructions ALU entières pour 95 IMAD** et
+~32 autres, soit 288 instructions-warp. Ce que cela coûte par SM et par cycle :
+
+| architecture | voies INT32 / SM | cycles ALU | cycles d'émission | goulot | perf / SM·cycle |
+|---|---|---|---|---|---|
+| Ampere GA10x | 64 | 161/2 = 80,5 | 288/4 = 72 | **ALU** | 1,00 |
+| Ada AD10x | 64 | 80,5 | 72 | **ALU** | 1,00 |
+| Hopper H100 | 64 | 80,5 | 72 | **ALU** | 1,00 |
+| Blackwell GB20x | **128 unifiées** | (161+95)/4 = 64 | 72 | **émission** | **1,12** |
+
+Blackwell fusionne les cœurs INT32 et FP32 : les 128 voies traitent les deux, ce
+qui double le débit entier par SM. Le noyau cesse alors d'être limité par l'ALU
+et bute sur la limite d'émission de 4 instructions/cycle/SM — d'où 1,12 et non 2.
+
+Conséquence directe et contre-intuitive : **les cartes de datacenter sont un
+mauvais choix ici**. H100 et A100 ont les mêmes 64 voies INT32 par SM qu'une
+carte grand public, pour 6 à 13 fois le prix horaire. Leurs cœurs tensoriels et
+leur HBM — ce qui justifie leur tarif — ne servent strictement à rien à ce noyau.
+
+### 7.3  Coût réel sur vast.ai (relevé septembre 2026)
+
+`h GPU` = 772 / rapport. Le coût total ne dépend **que** des heures-GPU : la
+parallélisation n'achète que du temps de calendrier, jamais des euros.
+
+| GPU | SM × GHz | rapport | h GPU | $/h spot | **coût spot** | $/h à la demande | coût à la demande |
+|---|---|---|---|---|---|---|---|
+| RTX 4070 (référence) | 46 × 2,48 | 1,00 | 772 | — | — | — | — |
+| RTX 3090 | 82 × 1,70 | 1,22 | 632 | 0,12 | 76 $ | 0,20 | 126 $ |
+| RTX 5070 Ti | 70 × 2,45 | 1,69 | 458 | 0,10 | 46 $ | 0,20 | 92 $ |
+| RTX 5080 | 84 × 2,62 | 2,16 | 358 | 0,12 | 43 $ | 0,25 | 90 $ |
+| RTX 4090 | 128 × 2,52 | 2,83 | 272 | 0,11 | **30 $** | 0,25 | 68 $ |
+| **RTX 5090** | **170 × 2,41** | **4,02** | **192** | **0,15** | **29 $** | **0,32** | **61 $** |
+| L40S | 142 × 2,52 | 3,14 | 246 | — | — | 0,55 | 135 $ |
+| A100 80 Go | 108 × 1,41 | 1,34 | 577 | — | — | 0,75 | 433 $ |
+| H100 SXM | 132 × 1,76 | 2,03 | 379 | — | — | 1,65 | 625 $ |
+
+**La RTX 5090 gagne sur les deux axes à la fois.** Elle coûte le même prix que
+la 4090 (29 $ contre 30 $) tout en allant 1,42× plus vite. Une H100 coûterait
+**21 fois plus cher** pour aller **deux fois moins vite**.
+
+Temps de calendrier en louant plusieurs 5090 spot — le coût reste ~29 $ :
+
+| 5090 en parallèle | 1 | 4 | 8 | 16 | 32 |
+|---|---|---|---|---|---|
+| calendrier | 8,0 j | 2,0 j | 24 h | 12 h | 6 h |
+
+### 7.4  Plan recommandé
+
+1. **Louer une seule 5090 spot dix minutes (≈ 0,03 $)** et lancer
+   `./langford6 -n 31 --bench 64`. Le rapport de 4,02 ci-dessus est un *modèle*
+   d'architecture ; ce test le remplace par une *mesure*, sur le même échantillon
+   de `vhi` que la 4070. Tout le reste du budget en découle.
+2. Choisir le nombre de workers selon le temps voulu, puis lancer
+   `./worker.sh <i> <W> 31 4096` sur chacun (4096 tâches ≈ 2,8 min chacune sur
+   une 5090).
+3. Rassembler avec `./collect.sh 31 4096 parts_*.txt`.
+
+**Le spot est le bon choix ici**, alors qu'il est risqué pour un entraînement :
+
+* chaque tâche est indépendante et **idempotente** — aucune communication entre
+  workers, 40 octets de sortie par tâche ;
+* une préemption ne coûte que la tâche en cours (~3 min), `worker.sh` saute au
+  redémarrage tout ce qui est déjà dans `parts_n31.txt` ;
+* `collect.sh` refuse de conclure s'il manque une tâche ou s'il y en a une en
+  double, **et** `--merge` vérifie que la somme est divisible par 2^{2n} — un
+  test que toute tranche manquante, dupliquée ou corrompue fait échouer (§3).
+
+Attention à l'image : Blackwell (`sm_120`) exige **CUDA ≥ 12.8**. `build.sh` le
+détecte et refuse de produire un binaire inutilisable.
+
+### 7.5  Équilibrage des tranches
+
+Le nombre de blocs lancés pour une valeur de `vhi` vaut `NV − vhi` (prédicat de
+réflexion), donc la charge décroît linéairement. Mesuré sur les 144 tirages, le
+coût brut moyen chute d'un facteur **7** du premier au dernier quartile de `vhi` :
+
+| quartile de `vhi` | [0, ¼) | [¼, ½) | [½, ¾) | [¾, 1) |
+|---|---|---|---|---|
+| coût brut moyen | 0,560 s | 0,438 s | 0,240 s | 0,080 s |
+| divisé par `(NV−vhi)/NV` | 0,637 | 0,690 | 0,627 | 0,671 |
+
+La seconde ligne est plate au bruit près : le modèle est le bon. Un découpage à
+`vhi` égaux donnerait donc des tâches allant du simple au septuple. `run_shard.sh`
+découpe à **charge** égale en inversant la charge cumulée `v·NV − v²/2` :
+
+    v_i = NV · (1 − √(1 − i/T))
 
 ---
 
 ## 8. Utilisation
 
 ```sh
-./build.sh                       # v3/v4/v5/v6 + les outils de vérification
+./build.sh                       # détecte l'architecture (native, sinon sm_XX)
 
 ./langford6 -n 24                # run complet (version de référence)
-./langford6 -n 31 --from 0 --count 1000    # tranche, pour exécution distribuée
+./langford6 -n 31 --bench 64     # calibre CE GPU en ~20 s, projette le total
 ./langford5 -n 24                # version précédente, pour recoupement croisé
+```
 
+**Calcul distribué** (une machine louée = un worker) :
+
+```sh
+./worker.sh 0 8 31 4096          # worker 0 sur 8, n=31, 4096 tâches
+./worker.sh 1 8 31 4096          # ... sur une autre machine
+./collect.sh 31 4096 parts_*.txt # vérifie la complétude puis conclut
+```
+
+Rejouer la même commande après une préemption reprend où le worker s'était
+arrêté. Les briques de plus bas niveau, si besoin :
+
+```sh
+./run_shard.sh 17 4096 31        # une tâche isolée -> ligne PART=...
+./langford6 -n 31 --diag         # les orbites fixes (une seule fois)
+./langford6 -n 31 --merge <PART...>   # somme + auto-test de divisibilité
+```
+
+**Vérification et théorie**
+
+```sh
 ./oe_check 31                    # vérifie la décomposition de parité
 ./oe_ref 12 ; ./oe_ref2 12       # références CPU : coordonnées, puis réflexion
 ./pfaff_test 11                  # Kasteleyn ±1  : impossible
@@ -911,6 +1045,14 @@ carte.
 * `langford2.cu`, `langford.cu` — versions à symétrie ×4, conservées pour
   recoupement croisé
 * `langford_ref.c` — référence CPU au plus près de la définition
+
+**Calcul distribué**
+
+* `build.sh` — compilation portable, refuse une architecture que le toolkit
+  installé ne connaît pas (Blackwell exige CUDA ≥ 12.8)
+* `run_shard.sh` — une tâche, découpée à charge égale (§7.5)
+* `worker.sh` — un worker sur une machine louée, reprise après préemption
+* `collect.sh` — vérifie complétude et absence de doublons, puis conclut
 
 **Vérification et théorie**
 

@@ -21,6 +21,7 @@
 #include <cstdint>
 #include <cstring>
 #include <ctime>
+#include <cmath>
 #include <cuda_runtime.h>
 
 #define CHECK(x) do{ cudaError_t e_=(x); if(e_!=cudaSuccess){ \
@@ -447,13 +448,36 @@ static kern_t pick(int N){ switch(N){
     INST(27) INST(28) INST(31) default: return NULL; } }
 
 int main(int argc,char**argv){
-    int N=15; long long from=0,count=-1; int chunk=16;
+    int N=15; long long from=0,count=-1; int chunk=16, diagonly=0, merge=0, bench=0;
     for(int i=1;i<argc;i++){
         if(!strcmp(argv[i],"-n")) N=atoi(argv[++i]);
         else if(!strcmp(argv[i],"--from")) from=atoll(argv[++i]);
         else if(!strcmp(argv[i],"--count")) count=atoll(argv[++i]);
         else if(!strcmp(argv[i],"--chunk")) chunk=atoi(argv[++i]);
+        else if(!strcmp(argv[i],"--diag")) diagonly=1;
+        else if(!strcmp(argv[i],"--bench")) bench=(i+1<argc&&argv[i+1][0]!='-')?atoi(argv[++i]):64;
+        else if(!strcmp(argv[i],"--merge")) { merge=i+1; break; }
         else { fprintf(stderr,"unknown arg %s\n",argv[i]); return 1; } }
+
+    /* --merge : additionne des sommes partielles hexadecimales et conclut.
+     * Chaque tranche distribuee (y compris --diag) sort une ligne PART=...   */
+    if(merge){
+        u160 t; memset(&t,0,sizeof t);
+        for(int i=merge;i<argc;i++){ u160 x; 
+            if(sscanf(argv[i],"%8x:%8x:%8x:%8x:%8x",&x.w[4],&x.w[3],&x.w[2],&x.w[1],&x.w[0])!=5){
+                fprintf(stderr,"partiel illisible : %s\n",argv[i]); return 1; }
+            h_add(&t,&x); }
+        h_shl2(&t);
+        int ok=1; for(int b=0;b<2*N;b++) if((t.w[b>>5]>>(b&31))&1) ok=0;
+        if(!ok){ fprintf(stderr,"*** AUTO-TEST ECHOUE : non divisible par 2^%d ***\n",2*N);
+                 fprintf(stderr,"    (tranche manquante, dupliquee, ou corrompue)\n"); return 1; }
+        u160 v; memset(&v,0,sizeof v);
+        for(int b=2*N;b<160;b++) if((t.w[b>>5]>>(b&31))&1) v.w[(b-2*N)>>5]|=1u<<((b-2*N)&31);
+        printf("n=%d   V(n) = 2*L(2,n) = ",N); print_u160(v); printf("\n");
+        uint32_t c=0; u160 h;
+        for(int q=4;q>=0;q--){ uint32_t x=v.w[q]; h.w[q]=(x>>1)|(c<<31); c=x&1; }
+        printf("n=%d   L(2,%d)         = ",N,N); print_u160(h); printf("\n");
+        return 0; }
 
     const int FREE = N-1;                       /* bits libres par rangee */
     if (FREE < K_ || FREE < 8){ fprintf(stderr,"n trop petit pour ce decoupage\n"); return 1; }
@@ -469,9 +493,54 @@ int main(int argc,char**argv){
     fprintf(stderr,"n=%d  rangees de %d cases  K=%d  blocs=%d  vhi=%lld  points=2^%d\n",
             N,N,K_,blocks,nvhi,2*FREE);
 
+    /* --bench [S] : calibre le debit sur CE GPU sans faire tourner le calcul.
+     * On tire S valeurs de vhi au hasard mais avec une graine FIXE, donc deux
+     * GPU differents mesurent exactement le meme echantillon : la comparaison
+     * est appariee et le rapport est bien plus precis que chaque estimation
+     * absolue prise separement.  Le cout par vhi varie d'un facteur ~10 selon
+     * le motif de bits (elagage par les bitmaps de survie), d'ou la necessite
+     * d'un tirage uniforme plutot que de quelques points choisis.            */
+    if(bench){
+        cudaDeviceProp pr; CHECK(cudaGetDeviceProperties(&pr,0));
+        int khz=0; cudaDeviceGetAttribute(&khz,cudaDevAttrClockRate,0);
+        printf("GPU        : %s  (%d SM, sm_%d%d, %.0f MHz)\n",
+               pr.name,pr.multiProcessorCount,pr.major,pr.minor,khz/1000.0);
+        /* rodage : monte les horloges avant de chronometrer */
+        for(int w=0;w<3;w++){ Kf<<<blocks,256>>>(0u,1u,0u,d_out); }
+        CHECK(cudaDeviceSynchronize());
+        unsigned st=12345u; double sum=0,sum2=0; int S=bench, got=0;
+        struct timespec A,B;
+        while(got<S){
+            st = st*1103515245u + 12345u;                  /* LCG portable */
+            long long s0 = (long long)((st>>1) % (unsigned long long)nvhi);
+            long long b0 = ((long long)s0<<K_)>>8; if(b0<0) b0=0;
+            int nb = blocks-(int)b0; if(nb<=0) continue;
+            clock_gettime(CLOCK_MONOTONIC,&A);
+            Kf<<<nb,256>>>((uint32_t)s0,1u,(uint32_t)b0,d_out);
+            CHECK(cudaGetLastError()); CHECK(cudaDeviceSynchronize());
+            clock_gettime(CLOCK_MONOTONIC,&B);
+            double t=(B.tv_sec-A.tv_sec)+(B.tv_nsec-A.tv_nsec)*1e-9;
+            sum+=t; sum2+=t*t; got++;
+        }
+        double m=sum/S, var=(sum2-S*m*m)/(S-1), se=sqrt(var/S);
+        double tot=m*(double)nvhi;
+        printf("echantillon: %d vhi (graine fixe)  moyenne %.4f s/vhi  err-std %.1f%%\n",
+               S,m,100*se/m);
+        printf("PROJECTION n=%d : %.1f h GPU = %.2f jours   (IC95%% %.1f .. %.1f h)\n",
+               N, tot/3600.0, tot/86400.0, (m-2*se)*nvhi/3600.0, (m+2*se)*nvhi/3600.0);
+        printf("BENCH_SPV=%.6f  BENCH_GPUH=%.2f\n", m, tot/3600.0);
+        return 0; }
+
     u160 total; memset(&total,0,sizeof total);
     struct timespec T0,T1; clock_gettime(CLOCK_MONOTONIC,&T0);
     long long done=0;
+    if(diagonly){                       /* uniquement les orbites fixes e=f(o) */
+        dker_t Dk=dpick(N); Dk<<<blocks,256>>>(d_out); CHECK(cudaGetLastError());
+        CHECK(cudaMemcpy(h_out,d_out,(size_t)blocks*5*4,cudaMemcpyDeviceToHost));
+        for(int q=0;q<blocks;q++) h_add(&total,(u160*)(h_out+5*q));
+        printf("PART=%08x:%08x:%08x:%08x:%08x   (diagonale n=%d)\n",
+               total.w[4],total.w[3],total.w[2],total.w[1],total.w[0],N);
+        return 0; }
     for(long long s=from;s<from+count;s+=chunk){
         int c=(int)((s+chunk<=from+count)?chunk:(from+count-s));
         /* seuls les blocs avec u >= v peuvent contribuer (predicat v <= u) */
@@ -506,7 +575,9 @@ int main(int argc,char**argv){
         uint32_t c=0; u160 h;
         for(int q=4;q>=0;q--){ uint32_t x=v.w[q]; h.w[q]=(x>>1)|(c<<31); c=x&1; }
         printf("n=%d   L(2,%d)         = ",N,N); print_u160(h); printf("\n");
-    } else { printf("PARTIAL n=%d vhi %lld..%lld sum = ",N,from,from+done-1);
-             print_i160(total); printf("\n"); }
+    } else {
+        printf("PART=%08x:%08x:%08x:%08x:%08x   (n=%d vhi %lld..%lld)\n",
+               total.w[4],total.w[3],total.w[2],total.w[1],total.w[0],N,from,from+done-1);
+    }
     return 0;
 }
