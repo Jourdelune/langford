@@ -447,6 +447,104 @@ Aucun record plus accessible dans la famille.
   qui réduit les 21 instructions de propagation de retenue, laisseraient peut-être
   10 à 15 %.
 
+### 5.4  Idées propres, dérivées ici — et pourquoi elles ne cassent pas le 4ⁿ
+
+Ces pistes ne viennent d'aucun article ; je les ai construites à partir de la
+structure du problème. Aucune n'aboutit, mais chacune ferme quelque chose ou
+éclaire pourquoi la barrière tient.
+
+**(a) Une identité locale sur les croisements.** Pour une corde *c* de longueur
+*d* dans un diagramme de cordes quelconque, il y a exactement *d−1* positions
+strictement à l'intérieur. Chaque corde extérieure qui la croise y pose un pied,
+chaque corde entièrement intérieure y en pose deux. D'où, exactement :
+
+        #croisements(c) = d(c) − 1 − 2·#{cordes imbriquées dans c}
+
+donc **#croisements(c) ≡ d(c) − 1 (mod 2)**. Vérifié sans exception sur tous les
+appariements de Langford jusqu'à n=12 (`struct.c`). Conséquences :
+
+* en sommant, **cr(M) ≡ nest(M) + K (mod 2)** avec K = Σ(d−1)/2 constant (K est
+  pair pour n=31, donc cr ≡ nest) ;
+* le graphe des croisements a une **suite de parités de degrés fixe** : ce sont
+  exactement les 16 cordes de longueur paire qui croisent un nombre impair de
+  cordes ;
+* et, en comptant les cordes ouvertes au moment de chaque ouverture,
+  **nest(M) + cr(M) = Σ_c o(a_c)** — quantité, elle, parfaitement suivie par une
+  DP à fenêtre.
+
+Cette dernière identité est frustrante de près : on sait suivre `nest + cr` en
+2ⁿ, on connaît `cr − nest` **modulo 2**, mais pas sa valeur — donc on ne sépare
+pas cr. Le signe du Pfaffien reste hors de portée.
+
+**(b) Kasteleyn généralisé — et son certificat de décès.** Le §5.1 montre qu'il
+n'existe pas de pondération d'arêtes rendant cr affine. Mais la vraie condition
+pour qu'un Pfaffien fonctionne est plus faible : il suffirait que **cr se
+factorise par *d* formes linéaires** de l'ensemble d'arêtes. On pourrait alors
+faire le Pfaffien sur l'algèbre de groupe (Z/2)^d — de dimension 2^d — et lire
+le signe dans chaque classe, pour un coût **2^{n+d}·poly**. Si *d* était petit,
+le 4ⁿ tomberait.
+
+Test : *d* doit au moins valoir log₂ du nombre de « différences mauvaises »
+(paires d'appariements de parités de croisement différentes), sinon un
+sous-espace de codimension *d* ne peut les éviter toutes.
+
+| n | appariements | paires à cr différent | d ≳ | 2^{n+d} | 4ⁿ |
+|---|---|---|---|---|---|
+| 7 | 52 | 672 | 9,4 | 2^{16,4} | 2^{14} |
+| 8 | 300 | 21 344 | 14,4 | 2^{22,4} | 2^{16} |
+| 11 | 35 584 | 3,16·10⁸ | 28,2 | 2^{39,2} | 2^{22} |
+| 12 | 216 288 | 1,17·10¹⁰ | 33,4 | 2^{45,4} | 2^{24} |
+
+*d* croît comme **~2,8n**, donc 2^{n+d} ≈ 2^{3,8n} — bien pire que 4ⁿ = 2^{2n}.
+La généralisation est morte, et pour une raison quantitative : le nombre
+d'appariements de Langford croît en 2^{3,7n}, donc les parités de croisement
+sont bien trop « désordonnées » pour tenir dans peu de bits.
+
+**(c) Le vrai nom de la barrière.** Le compte de Langford est exactement le
+coefficient multilinéaire d'un produit de *n* formes quadratiques,
+
+        [x_1…x_{2n}]  prod_{i=2}^{n+1} (x^T M_i x)
+
+c'est-à-dire un **hafnien mixte**. Son analogue *signé* — le **discriminant
+mixte** — se calcule, lui, en 2ⁿ·poly par inclusion-exclusion sur les *n*
+matrices : D(A_1..A_n) = (1/n!)·Σ_{S⊆[n]} (−1)^{n−|S|} det(Σ_{i∈S} A_i). La
+barrière 4ⁿ ici **est** l'écart permanent/déterminant, ni plus ni moins, et
+Kasteleyn en est le seul pont connu — pont dont j'ai montré (§5.1, et (b)
+ci-dessus) qu'il n'existe pas pour Langford.
+
+**(d) Une seule équation au lieu de 2n.** Si v est le vecteur de couverture,
+Σ_k v_k = 2n est automatique, et **v = 𝟙 ⟺ Σ_k v_k² = 2n**. Tout le problème
+tient donc en une équation quadratique. Mais Σv² = 2n + 2·(#collisions), donc
+compter à Σv² fixé revient à compter par nombre de conflits — une fonction de
+partition à interactions par paires sur un graphe complet de n couleurs. Aucun
+gain : c'est l'inclusion-exclusion sur les positions qui en est déjà la forme
+efficace.
+
+**(e) Réécriture polynomiale univariée.** En notant s_i la position d'ouverture
+de la couleur i, le problème est exactement
+
+        sum_{i=2}^{n+1}  x^{s_i} (1 + x^i)  =  x + x² + … + x^{2n}
+
+une identité de polynômes. Évaluée modulo x^{2n+1}−1 elle devient une identité
+dans l'algèbre du groupe cyclique, donc une condition sur des racines de
+l'unité. Séduisant, mais compter les solutions d'une identité polynomiale
+ramène à extraire des coefficients, c'est-à-dire à Godfrey.
+
+**(f) Repliement multi-modules.** Modulo x^d−1, la condition ne porte que sur
+les (s_i mod d) : une inclusion-exclusion sur d classes au lieu de 2n, soit
+2^d. Nécessaire mais pas suffisant. Et combiner plusieurs modules ne suffit pas
+non plus : connaître les sommes par classe modulo d₁ et modulo d₂ ne donne que
+deux projections marginales d'un tableau bidimensionnel — c'est de la
+tomographie discrète, structurellement sous-déterminée.
+
+**(g) Version cyclique et spectre de puissance.** Pour la variante *cyclique*
+du problème, les autocorrélations deviennent circulaires, donc (Wiener-Khinchin)
+entièrement déterminées par le spectre de puissance |X̂(ω)|² — et le poids
+(∏x_k) l'est aussi, car |Σx| est lu dans le spectre et sa parité est forcée. La
+sommande ne dépend alors que du spectre. Malheureusement le nombre de spectres
+distincts d'une suite ±1 vaut ~2^{2n}/(4n) : aucun gain exponentiel. Et de toute
+façon Langford est aperiodique.
+
 ---
 
 ## 6. Est-ce un vrai progrès sur l'état de l'art ?
@@ -643,6 +741,8 @@ carte.
 * `fiber.c` — fibres de la carte d'autocorrélation
 * `parity.c` — l'expérience historique sur la parité des croisements
 * `refl_test.c` — validation de σ = canon(reverse) dans les coordonnées de la v3
+* `struct.c` — vérification des identités de croisement du §5.4(a) et mesure du
+  certificat de décès du §5.4(b)
 * `zfrac.c` — fraction de produits non nuls
 * `estimate.c` — estimateur de Knuth non biaisé (CPU, OpenMP)
 * `find_langford.c` — recherche de solutions, avec vérification indépendante
