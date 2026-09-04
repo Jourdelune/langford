@@ -45,3 +45,4 @@ vast_*.json
 .ssh_orch
 .ssh_orch.pub
 parts_merge.txt
+orch.log
