@@ -578,6 +578,45 @@ de transfert est de degré plein, il n'y a aucune compression à en tirer.
 Extrapoler coûterait autant que dérouler la DP. Piste morte, et pour une raison
 structurelle nette.
 
+**(i) Grassmannisation partielle.** C'est l'idée la plus prometteuse que j'aie
+eue, parce qu'elle attaque l'écart permanent/déterminant par le milieu au lieu
+de chercher à le franchir.
+
+Le gouffre 4ⁿ contre 2ⁿ·poly est exactement celui entre **variables nilpotentes
+commutantes** (extraction en 2^{2n} évaluations ±1, couleurs gratuites — c'est
+Godfrey) et **variables de Grassmann anticommutantes** (2ⁿ Pfaffiens, mais le
+résultat est signé et le signe n'est pas rattrapable). Rien n'oblige à choisir :
+on peut rendre **un sous-ensemble A de positions** grassmannien et laisser le
+reste commutant. L'homogénéité tient encore (le degré en y vaut |Aᶜ| = le nombre
+de variables y), donc l'extraction coûte 2^{|Aᶜ|} évaluations ±1, et pour chacune
+l'intégrale de Berezin sur A demande l'inclusion-exclusion sur les n couleurs :
+
+        coût = 2^{n + |Aᶜ|}
+
+* |A| = 0 : 2^{2n} — Godfrey (avec évaluation directe, les couleurs redeviennent
+  gratuites) ;
+* |A| = 2n : 2ⁿ — le Pfaffien pur, mais signé, donc mort ;
+* **|A| > n : sous le 4ⁿ.**
+
+Il faut pour cela que `sign_A(M)·∏_{e∈M} w_e` soit constant sur les appariements
+de Langford, où sign_A(M) est la parité du nombre d'inversions de la suite des
+positions de A lues dans l'ordre des couleurs. C'est le même test GF(2) que le
+§5.1, mais **restreint à A** — donc strictement plus faible, et il pourrait
+passer là où Kasteleyn échoue.
+
+Mesure (`partial.c`, glouton avec 40 redémarrages aléatoires) :
+
+| n | 2n | seuil de gain | **|A| maximal** | coût | 4ⁿ |
+|---|---|---|---|---|---|
+| 7 | 14 | > 7 | **6** | 2^15 | 2^14 |
+| 8 | 16 | > 8 | **5** | 2^19 | 2^16 |
+
+Le maximum atteignable **décroît** (6 puis 5) alors que le seuil **croît** (8
+puis 9) : l'écart se creuse. Les positions retenues sont d'ailleurs un préfixe
+— {1,2,3,4,5} — c'est-à-dire exactement là où il y a peu de croisements. Piste
+fermée, et sa forme dit pourquoi : le signe grassmannien est irréductiblement
+global.
+
 ---
 
 ## 6. Est-ce un vrai progrès sur l'état de l'art ?
@@ -774,6 +813,7 @@ carte.
 * `fiber.c` — fibres de la carte d'autocorrélation
 * `parity.c` — l'expérience historique sur la parité des croisements
 * `refl_test.c` — validation de σ = canon(reverse) dans les coordonnées de la v3
+* `partial.c` — plus grand ensemble grassmannien admissible, §5.4(i)
 * `toeplitz.c` — ordre de la récurrence des hafniens de Toeplitz, §5.4(h)
 * `struct.c` — vérification des identités de croisement du §5.4(a) et mesure du
   certificat de décès du §5.4(b)
