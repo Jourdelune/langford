@@ -47,3 +47,4 @@ vast_*.json
 parts_merge.txt
 orch.log
 langford6.fat
+tensorcheck

@@ -362,6 +362,8 @@ Drain final : **287 instructions SASS par point survivant**.
   rend le même compte d'instructions (2 POPC + IADD3 → 1 POPC + LOP3 + 2 NOP de
   bourrage) : **0,0 % à trois tours de mesure**. Non retenu — la ligne d'origine
   est validée, on ne la touche pas pour rien.
+* **Vectoriser le balayage** (`LDS.128`) et **supprimer les lectures partagées
+  du drain** : 5 % et 4,5 % plus lent respectivement. Détail et raison au §4.10.
 * **Rebalayage de K après la v6.1.** Le drain ayant maigri de 12,5 %, l'optimum
   aurait pu se déplacer. Non : K=8 mesure 796 h (registres 64 → 71, et 34,8 Ko
   de mémoire partagée qui font tomber l'occupancy), K=6 mesure ~1 570 h. **K=7
@@ -431,6 +433,9 @@ un non-sujet ici, ce qui explique pourquoi aucun réglage de registres n'a jamai
 rien donné.)
 
 **Hypothèse 3 — mémoire partagée.** LSU à ~15 % d'utilisation. Rejeté.
+
+(Le profil complet, refait sur la v6.1 avec deux protocoles indépendants, est
+au §4.10.)
 
 **Conclusion.** Le noyau est à ~80 % du plafond d'émission que lui impose son
 propre mélange d'instructions (une instruction ALU occupe son pipe deux cycles,
@@ -566,6 +571,67 @@ K=7 — et pour eux seuls : à K=6 il en faut dix, et le dixième mot débordait
 la file des survivants du bloc, d'où un accès illégal. Le compte est maintenant
 dérivé de (N, K). C'est neutre à K=7, à l'octet et à l'instruction près.
 
+### 4.10  Où va le temps, maintenant (profil mesuré, pas estimé)
+
+Le §4.4 datait de la v6 et donnait des parts qui se recouvraient (« produit
+64 %, écarts impairs 55 %, base 30 % »), parce qu'elles venaient de suppressions
+qui masquaient aussi de la latence. Le profil ci-dessous est refait sur la v6.1
+avec deux protocoles distincts, et il ne se recouvre pas :
+
+* **suppression** pour les deux gros blocs du drain (on les remplace par un
+  calcul trivial gardant les mêmes dépendances) ;
+* **duplication** pour tout le reste — on fait le travail *deux fois*, ce qui
+  donne le coût marginal d'une passe sans toucher ni aux registres ni au
+  résultat. Les sondes de duplication produisent d'ailleurs toujours la bonne
+  valeur de L(2,20), ce qui les valide.
+
+| composant | part du temps | protocole |
+|---|---|---|
+| arbre de produit 160 bits | **22 %** | suppression |
+| écarts impairs (22 popcounts) | **24 %** | suppression |
+| compaction des survivants (file par warp) | **~11 %** | duplication |
+| balayage des bitmaps de survie (phase 3) | **~9 %** | duplication |
+| construction des tables (phases 1-2) | **~5 %** | duplication |
+| reste : lectures partagées du drain, ADD160, R(m), barrières, transfert hôte | ~29 % | par différence |
+
+Deux enseignements.
+
+**La « base » n'est pas 30 %, elle est ~25 % — mais elle n'est pas dans les
+tables.** Ce sont la compaction et le balayage qui la portent, pas la
+construction des bitmaps (5 %). Et les deux résistent :
+
+* le balayage fait déjà 16 LDS + **8** LOP3 par mot, pas 15 : ptxas émet des
+  `LOP3` à **trois** entrées (motif `0xfe`), donc réduire 16 valeurs lui coûte
+  déjà ⌈15/2⌉ instructions. Il n'y a rien à gagner là où je croyais ;
+* la compaction tourne au **maximum** du nombre de survivants sur les 32 voies,
+  pas à leur moyenne : 8,3 tours contre 4,1 utiles, soit un facteur 2 structurel.
+  Fusionner les 4 mots de `live` en une seule boucle ramènerait 33,2 tours à
+  24,8 — mais il faut alors avancer d'un mot à l'autre dans le corps, ce qui
+  coûte les 4 instructions que l'on vient d'économiser. C'est un lavage exact.
+
+**Le modèle « seul le compte d'instructions compte » (§4.8) tient toujours, et
+il se retourne contre les optimisations mémoire.** Deux tentatives, mesurées,
+toutes deux perdantes :
+
+* **Balayage vectorisé.** Une tranche de bitmap tient en 16 octets ; en
+  supprimant le bourrage anti-bancs (WP = W = 4) les W mots deviennent
+  contigus et alignés, donc un seul `LDS.128` remplace 4 lectures 32 bits —
+  64 lectures dynamiques tombent à 16 par thread et par vhi. **Mesure : 5 %
+  plus lent** (trois tours). Le compte statique ne bouge pas (la boucle en `w`
+  n'est pas déroulée), les registres passent de 64 à 80, et il faut garder les
+  4 mots vivants pendant tout le drain. Ce qu'on gagne en lectures, on le perd
+  en pression de registres.
+* **Suppression des lectures partagées du drain.** Remplacer `sT[el2]` et
+  `sPw[t2]` par de l'arithmétique sur `(t2, el2)` retire 13 LDS par survivant
+  et rend le noyau **4,5 % plus lent** : la mémoire partagée n'est pas le
+  goulot (LSU à ~15 %), et l'arithmétique de remplacement coûte plus cher que
+  les lectures qu'elle évite.
+
+Autrement dit : à ce stade, tout ce qui échange des instructions ALU contre du
+trafic mémoire, ou l'inverse, est neutre ou perdant. Il ne reste que le compte,
+et les deux gros blocs sont à leur plancher — l'arbre depuis la v6.1 (§4.9),
+les popcounts depuis la v6 (§4.4).
+
 ---
 
 ## 5. Pistes de recherche
@@ -658,13 +724,49 @@ suivant est n=26 → 3n = 78 positions → 2⁷⁵ points, soit ~16 000 ans.
 L(4,n) : seul n=24 est connu, l'ouvert suivant est n=31 → 4n = 124 positions.
 Aucun record plus accessible dans la famille.
 
+**Tensor cores — fermés par la mesure.** Les 15 écarts impairs sont bilinéaires
+en (o,e), donc formellement un GEMM : c'était la piste la plus prometteuse
+restante. Elle ne tient pas, et l'erreur de l'estimation initiale est
+identifiable.
+
+Deux débits mesurés sur la 4070 de ce dépôt (`tensorcheck.cu`) :
+
+| | débit |
+|---|---|
+| `mma.sync.m16n8k32.s8` (tensor cores INT8) | **116,0·10¹² MAC/s** |
+| `xor` + masque + `popc` — le motif exact du drain | **46,8·10¹² MAC binaires/s** |
+
+Le premier chiffre reproduit la spec (1,16·10¹⁴), donc le banc est bon. Le
+rapport n'est que de **2,48×**, et c'est là que l'estimation initiale se
+trompait : elle comparait implicitement le tensor core à de l'arithmétique
+scalaire. Or **`popc` sur un XOR 32 bits *est* un produit scalaire binaire de
+longueur 32** — une instruction SIMD-dans-un-registre. Le tensor core n'a pas
+en face de lui un pipe scalaire, il a un autre moteur de produits scalaires.
+
+Et il perd le reste sur le volume. Un GEMM calcule **tous** les couples
+(thread, e_lo) d'un (bloc, vhi), soit 256 × 128 = 32 768 ; le drain, lui, ne
+touche que les **12,9 %** qui survivent, et le §4.5 lui retire encore 8 des
+30 corrélations.
+
+| | MAC par (bloc, vhi) |
+|---|---|
+| GEMM dense : 32 768 couples × 675 positions | 22,1·10⁶ |
+| drain actuel : 4 227 survivants × 519 positions | 2,19·10⁶ |
+
+**10,1× plus de MAC à 2,48× la vitesse : le GEMM serait 4,1× plus lent.** Et ce
+n'est même pas le pire : les 30 matrices de sortie font ~1 Mo par bloc, donc
+elles ne tiennent pas en mémoire partagée. Il faudrait fondre le drain dans
+l'épilogue du MMA, avec 30 fragments d'accumulateurs (120 registres) vivants
+simultanément.
+
+Reste la question naturelle : ne peut-on pas ne calculer que les survivants ?
+Non. Chaque survivant a **son** o et **son** e ; un produit matriciel 16×8
+calculerait les 128 couples croisés pour n'en garder que 16 — le gâchis passe
+de 7,8× à 128×. La sparsité est un sous-ensemble de 12,9 % d'un produit
+cartésien, exactement ce qu'un MMA dense ne sait pas exploiter.
+
 ### 5.3 Ouvertes, non explorées à fond
 
-* **Tensor cores.** Les 15 écarts impairs sont *bilinéaires* en (o,e), donc
-  formellement un GEMM (~230 MAC par couple, contre ~1,16·10¹⁴ MAC/s en INT8).
-  Cela retirerait ~40 % du drain du chemin ALU. Estimation non prototypée :
-  plafond ALU restant ≈ 200 Gsums/s canoniques → ~20 jours. Le coût est une
-  réécriture complète du drain avec sortie streamée en mémoire partagée.
 * **Battre le 4ⁿ.** Reste ouvert. Les quatre voies connues sont fermées
   ci-dessus ; ce qu'il faudrait, c'est un mécanisme qui traite la contrainte de
   couverture (2^{2n} en inclusion-exclusion, 2ⁿ en largeur arborescente) et la
@@ -1532,6 +1634,8 @@ Les briques de plus bas niveau, si besoin :
 
 **Vérification et théorie**
 
+* `tensorcheck.cu` — débit mesuré des tensor cores INT8 contre le motif
+  `xor`+masque+`popc` du drain : c'est ce banc qui ferme la piste GEMM (§5.2)
 * `oe_check.c` — décomposition de parité, vérifiée jusqu'à n=31
 * `oe_ref.c` / `oe_ref2.c` — références CPU : coordonnées de parité, puis réflexion
 * `pfaff_test.c` / `pfaff_zk.c` — réfutation de Kasteleyn (±1 puis U(1))
