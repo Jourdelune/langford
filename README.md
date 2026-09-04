@@ -8,8 +8,8 @@ ouvert au-delà de n=28.
 Ce dépôt contient une implémentation CUDA de la méthode algébrique de Godfrey,
 poussée jusqu'à **5,84× plus vite** que mon point de départ — et **~39× plus
 vite que l'état de l'art publié, sur le même matériel** — avec au passage la
-fermeture — par preuve ou par mesure — de trois pistes qui étaient jusque-là
-seulement « non abouties ».
+fermeture — par preuve ou par mesure — de **quatre** pistes qui étaient
+jusque-là seulement « non abouties », dont les tensor cores (§5.2).
 
 | | n=24 | n=27 | n=28 | **n=31** |
 |---|---|---|---|---|
@@ -302,8 +302,11 @@ permet de **ne pas lancer** les blocs sans travail.
 ### 4.4 Creuser le drain
 
 Une fois la boucle chaude supprimée, tout est dans le drain. Décomposition
-mesurée : produit 64 %, écarts impairs 55 %, base 30 % (les parts se recouvrent,
-le noyau masquant de la latence).
+mesurée sur la v6 : produit 64 %, écarts impairs 55 %, base 30 % — les parts se
+recouvrent, parce qu'elles viennent de suppressions qui masquaient aussi de la
+latence. **Le profil de la v6.1, refait avec un protocole qui ne se recouvre
+pas, est au §4.10** ; il déplace le problème (la « base » est dans la compaction
+et le balayage, pas dans les tables).
 
 * Les 15 écarts impairs sortent des popcounts en **entiers**, et on les
   empaquetait en octets SWAR pour que l'arbre les ré-extraie aussitôt. On les
@@ -328,7 +331,8 @@ les cases 2..K+1. Donc **pour m ≥ K+1 cette corrélation ne dépend pas du tou
 Balayage de K : plus K est petit, plus de corrélations deviennent constantes,
 mais moins la construction des tables s'amortit. K=7 reste l'optimum.
 
-Drain final : **287 instructions SASS par point survivant**.
+Drain final : **287 instructions SASS par point survivant** — ramené à **251**
+par la v6.1 (§4.9).
 
 ### 4.6 Essayé, mesuré, sans gain
 
@@ -442,7 +446,10 @@ propre mélange d'instructions (une instruction ALU occupe son pipe deux cycles,
 une FMA un seul). Il n'est donc ni à optimiser par l'occupancy, ni par les
 pipes, ni par la mémoire : **seul le nombre d'instructions compte encore**. Et
 il est à 15 % de son plancher, avec les 22 popcounts des écarts impairs
-exactement au minimum et l'arbre de produit à ~1,4× du sien.
+exactement au minimum et l'arbre de produit à ~1,4× du sien. *(Ce dernier écart
+est celui que la v6.1 est allée chercher, et il n'existe plus : l'arbre est
+désormais au plancher du schoolbook, §4.9. Les décomptes 161 ALU / 95 IMAD de
+cette section décrivent la v6 ; la v6.1 donne 95 IADD3 pour 455 IMAD.)*
 
 **Contrôle du modèle (v6.1).** Cette conclusion se teste : si seul le compte
 d'instructions compte, alors remplacer les 23 POPC du drain par un `& 31` — même
@@ -767,8 +774,10 @@ cartésien, exactement ce qu'un MMA dense ne sait pas exploiter.
 
 ### 5.3 Ouvertes, non explorées à fond
 
-* **Battre le 4ⁿ.** Reste ouvert. Les quatre voies connues sont fermées
-  ci-dessus ; ce qu'il faudrait, c'est un mécanisme qui traite la contrainte de
+* **Battre le 4ⁿ.** Reste ouvert, et c'est désormais le **seul** point de cette
+  section — les tensor cores et l'arithmétique du produit ont rejoint les pistes
+  fermées. Les quatre voies connues pour casser l'exposant sont fermées aux
+  §5.1 et §5.2 ; ce qu'il faudrait, c'est un mécanisme qui traite la contrainte de
   couverture (2^{2n} en inclusion-exclusion, 2ⁿ en largeur arborescente) et la
   contrainte de distinction des écarts (2ⁿ) **sans que les deux se multiplient**.
   La structure particulière du problème — la couleur d'une arête est déterminée
@@ -1224,6 +1233,12 @@ Pour être clair sur ce qui est emprunté et ce qui ne l'est pas.
 * **Multiplication multi-précision tronquée en complément à deux**, avec la
   correction a_s·b_s = a_u·b_u − 2^w(s_a·b_u + s_b·a_u) — Knuth, *TAOCP* vol. 2,
   §4.3.1.
+* **Chaînes de retenue `mad{c}.{lo,hi}.cc` du PTX** (§4.9) : l'idiome standard
+  des bibliothèques de grands entiers sur GPU (CGBN, et l'exemple `mp` du SDK).
+  Ce qui est à moi ici n'est pas l'idiome, c'est d'avoir mesuré ce qu'il vaut
+  sur *ce* noyau et d'avoir vérifié que ptxas ne le trouve pas tout seul.
+* **Extension de signe d'octet par `prmt.b32`** avec le bit 3 du sélecteur
+  (§4.9) : documenté dans l'ISA PTX, mais nvcc ne l'émet que pour l'octet 0.
 * **Transformée de Walsh–Hadamard** : la somme de Godfrey *est* une convolution
   XOR de n fonctions indicatrices, ce qui rend explicite pourquoi elle coûte
   2^{2n} et pourquoi les fenêtres de temps n'y changent rien.
@@ -1252,6 +1267,14 @@ constantes et des résultats négatifs.
 5. **Saut des produits nuls par compaction warp** (§4.1) : l'observation que
    87 % des produits sont nuls est ancienne, mais elle était rejetée comme
    inexploitable en SIMT ; la compaction la rend exploitable.
+6. **Le tensor core ne bat pas le popcount sur une corrélation ±1** (§5.2).
+   Le réflexe « c'est bilinéaire, donc c'est un GEMM, donc ça va vite » est
+   faux ici, et pour une raison qui se mesure : `popc` sur un XOR 32 bits *est*
+   un produit scalaire binaire de longueur 32, si bien que l'INT8 ne mène que
+   2,48× sur cette carte — écart que la sparsité du problème (12,9 % de
+   survivants, qu'un MMA dense ne sait pas exploiter) retourne en 4,1× de
+   retard. Le résultat est négatif mais il est net, et je ne l'ai vu chiffré
+   nulle part.
 
 ---
 
@@ -1308,6 +1331,12 @@ cette carte.
 Le drain du noyau exécute **161 instructions ALU entières pour 95 IMAD** et
 ~32 autres, soit 288 instructions-warp. D'où ce raisonnement :
 
+*(Chiffres de la v6 ; la v6.1 ramène le drain à 251 instructions et déplace le
+mélange vers l'IMAD — 95 IADD3 et 455 IMAD sur le noyau entier, contre 149 et
+429. La ligne « goulot ALU » du tableau ci-dessous en devient moins serrée, ce
+qui va dans le même sens que la mesure qui suit : l'avantage prédit pour
+Blackwell rétrécit encore.)*
+
 | architecture | voies INT32 / SM | cycles ALU | cycles d'émission | goulot | perf / SM·cycle |
 |---|---|---|---|---|---|
 | Ampere GA10x | 64 | 161/2 = 80,5 | 288/4 = 72 | **ALU** | 1,00 |
@@ -1344,7 +1373,10 @@ d'Ada ; pour Blackwell il est simplement faux, et je ne sais pas dire pourquoi.
 Ce qui survit à la mesure, en revanche, c'est la conclusion sur les cartes de
 datacenter : H100 et A100 ont les mêmes 64 voies INT32 par SM qu'une carte grand
 public pour 6 à 13 fois le prix horaire, et leurs cœurs tensoriels comme leur
-HBM ne servent à rien ici.
+HBM ne servent à rien ici. « Ne servent à rien » est maintenant chiffré et non
+supposé : un GEMM INT8 sur les écarts impairs serait **4,1× plus lent** que les
+popcounts qu'il remplacerait (§5.2). Louer du tensor core pour ce noyau, c'est
+payer un silicium qu'il n'utilisera pas.
 
 ### 7.3  Coût réel sur vast.ai (relevé septembre 2026)
 
