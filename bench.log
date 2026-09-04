@@ -1,0 +1,5 @@
+14:06:40 local         NVIDIA GeForce RTX 4070   0.6956 s/vhi    1621.0 h GPU pour n=31
+14:07:10 vast49855369  NVIDIA GeForce RTX 5090   0.1107 s/vhi     258.1 h GPU pour n=31
+
+rapports mesures (base = 4070 locale) :
+  vast49855369   x6.28

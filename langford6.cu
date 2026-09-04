@@ -22,6 +22,10 @@
 #include <cstring>
 #include <ctime>
 #include <cmath>
+#ifndef LF6_MINBLK
+#define LF6_MINBLK 3          /* mesure : 3 supprime le spill sur sm_120 (+6,5 %)
+                              *          et reste neutre sur sm_89           */
+#endif
 #include <cuda_runtime.h>
 
 #define CHECK(x) do{ cudaError_t e_=(x); if(e_!=cudaSuccess){ \
@@ -218,7 +222,7 @@ template<int N> __device__ __forceinline__ int rowP(uint32_t r,int m){
                               head=(head+qlen)&63; qlen=0; } while(0)
 
 template<int N, int K>
-__global__ __launch_bounds__(256,5)
+__global__ __launch_bounds__(256,LF6_MINBLK)
 void oe_kernel(uint32_t vhi0, uint32_t vcnt, uint32_t blk0, uint32_t * __restrict__ out)
 {
     const int ME = (N+1)/2;            /* ecarts pairs   m=1..ME */
@@ -524,18 +528,34 @@ int main(int argc,char**argv){
         /* rodage : monte les horloges avant de chronometrer */
         for(int w=0;w<3;w++){ Kf<<<blocks,256>>>(0u,1u,0u,d_out); }
         CHECK(cudaDeviceSynchronize());
-        unsigned st=12345u; double sum=0,sum2=0; int S=bench, got=0;
+        /* Deux corrections, apres confrontation a une mesure a travail identique
+         * sur deux cartes ou l'ancienne version annoncait x5,8 pour un vrai x3,05 :
+         *   - splitmix64 remplace le LCG, dont les bits de poids faible donnaient
+         *     un sous-ensemble de vhi de plus en plus cher a mesure qu'on tirait
+         *     (juste a 64 tirages, 2x trop pessimiste a 128) ;
+         *   - on chronometre le chemin de PRODUCTION -- meme count qu'un --chunk,
+         *     recopie et reduction hote comprises -- et non un lancement isole a
+         *     count=1, qui ne charge pas deux cartes de la meme facon.        */
+        uint64_t st=0; double sum=0,sum2=0; int S=bench, got=0;
+        const int CB = 4;                    /* vhi par lancement, comme en production */
         struct timespec A,B;
         while(got<S){
-            st = st*1103515245u + 12345u;                  /* LCG portable */
-            long long s0 = (long long)((st>>1) % (unsigned long long)nvhi);
+            st += 0x9E3779B97F4A7C15ull;                   /* splitmix64 */
+            uint64_t z = st;
+            z = (z ^ (z>>30)) * 0xBF58476D1CE4E5B9ull;
+            z = (z ^ (z>>27)) * 0x94D049BB133111EBull;
+            z ^= z>>31;
+            long long s0 = (long long)(z % (unsigned long long)(nvhi-CB));
             long long b0 = ((long long)s0<<K_)>>8; if(b0<0) b0=0;
             int nb = blocks-(int)b0; if(nb<=0) continue;
             clock_gettime(CLOCK_MONOTONIC,&A);
-            Kf<<<nb,256>>>((uint32_t)s0,1u,(uint32_t)b0,d_out);
-            CHECK(cudaGetLastError()); CHECK(cudaDeviceSynchronize());
+            Kf<<<nb,256>>>((uint32_t)s0,(uint32_t)CB,(uint32_t)b0,d_out);
+            CHECK(cudaGetLastError());
+            CHECK(cudaMemcpy(h_out,d_out,(size_t)nb*5*4,cudaMemcpyDeviceToHost));
+            { u160 acc; memset(&acc,0,sizeof acc);
+              for(int q=0;q<nb;q++) h_add(&acc,(u160*)(h_out+5*q)); }
             clock_gettime(CLOCK_MONOTONIC,&B);
-            double t=(B.tv_sec-A.tv_sec)+(B.tv_nsec-A.tv_nsec)*1e-9;
+            double t=((B.tv_sec-A.tv_sec)+(B.tv_nsec-A.tv_nsec)*1e-9)/CB;
             sum+=t; sum2+=t*t; got++;
         }
         double m=sum/S, var=(sum2-S*m*m)/(S-1), se=sqrt(var/S);

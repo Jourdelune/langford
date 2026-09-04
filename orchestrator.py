@@ -276,8 +276,9 @@ def cmd_plan(a):
     print(f"\n  => {k} RTX 5090")
     for p, lbl in ((0.20, "spot"), (0.35, "a la demande")):
         print(f"     {lbl:<14} {k} x {a.hours} h x {p:.2f} $ = {k*a.hours*p:6.2f} $")
-    print(f"\n  Le rapport {a.ratio} est un MODELE. Le mesurer d'abord :")
-    print(f"     ./orchestrator.py up --count 1 && ./orchestrator.py bench")
+    print(f"\n  Rapport {a.ratio} : MESURE le 2026-09-04 sur une RTX 5090 louee,")
+    print(f"  a travail identique (memes vhi, un seul processus par carte).")
+    print(f"  Le modele d'architecture predisait 4,02 -- il etait 32 % trop optimiste.")
 
 def cmd_bench(a):
     """Mesure le vrai debit de chaque worker. Le rapport 5090/4070 utilise par
@@ -478,7 +479,7 @@ def main():
     P = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     S = P.add_subparsers(dest="cmd", required=True)
     q = S.add_parser("init");   q.add_argument("-n", type=int, default=31); q.add_argument("-T", type=int, default=8192); q.set_defaults(f=cmd_init)
-    q = S.add_parser("plan");   q.add_argument("--hours", type=float, default=10); q.add_argument("--ratio", type=float, default=4.02); q.add_argument("--base", type=float, default=772); q.set_defaults(f=cmd_plan)
+    q = S.add_parser("plan");   q.add_argument("--hours", type=float, default=10); q.add_argument("--ratio", type=float, default=3.05); q.add_argument("--base", type=float, default=772); q.set_defaults(f=cmd_plan)
     q = S.add_parser("offers"); q.add_argument("--count", type=int, default=12); q.add_argument("--bid", action="store_true"); q.set_defaults(f=cmd_offers)
     q = S.add_parser("up");     q.add_argument("--count", type=int, required=True); q.add_argument("--bid", type=float, default=0); q.add_argument("--max-price", type=float, default=0.40); q.set_defaults(f=cmd_up)
     q = S.add_parser("tfa")

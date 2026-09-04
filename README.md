@@ -901,10 +901,10 @@ cartes est bien plus précis que chacune des deux estimations absolues.
 Tout l'état de l'art publié (L(27) + L(28)) se refait en **16 heures** sur cette
 carte.
 
-### 7.2  Quelle architecture, et pourquoi
+### 7.2  Quelle architecture — le modèle, puis la mesure qui le contredit
 
 Le drain du noyau exécute **161 instructions ALU entières pour 95 IMAD** et
-~32 autres, soit 288 instructions-warp. Ce que cela coûte par SM et par cycle :
+~32 autres, soit 288 instructions-warp. D'où ce raisonnement :
 
 | architecture | voies INT32 / SM | cycles ALU | cycles d'émission | goulot | perf / SM·cycle |
 |---|---|---|---|---|---|
@@ -913,56 +913,62 @@ Le drain du noyau exécute **161 instructions ALU entières pour 95 IMAD** et
 | Hopper H100 | 64 | 80,5 | 72 | **ALU** | 1,00 |
 | Blackwell GB20x | **128 unifiées** | (161+95)/4 = 64 | 72 | **émission** | **1,12** |
 
-Blackwell fusionne les cœurs INT32 et FP32 : les 128 voies traitent les deux, ce
-qui double le débit entier par SM. Le noyau cesse alors d'être limité par l'ALU
-et bute sur la limite d'émission de 4 instructions/cycle/SM — d'où 1,12 et non 2.
+Blackwell fusionne les cœurs INT32 et FP32, donc le noyau devait cesser d'être
+limité par l'ALU et buter sur l'émission — d'où 1,12, et un rapport 5090/4070
+prédit de 3,70 × 0,97 × 1,12 = **4,02**.
 
-Conséquence directe et contre-intuitive : **les cartes de datacenter sont un
-mauvais choix ici**. H100 et A100 ont les mêmes 64 voies INT32 par SM qu'une
-carte grand public, pour 6 à 13 fois le prix horaire. Leurs cœurs tensoriels et
-leur HBM — ce qui justifie leur tarif — ne servent strictement à rien à ce noyau.
+> **Mesuré sur une RTX 5090 louée le 2026-09-04 : 3,05.**
+> Le modèle était **32 % trop optimiste**.
+
+Le protocole : même travail exactement des deux côtés (mêmes `vhi`, un seul
+processus par carte pour que l'initialisation du contexte CUDA — 0,12 s sur la
+4070, 0,23 s sur l'instance louée — reste négligeable). Trois régions :
+
+| `vhi` | 4070 | 5090 | rapport |
+|---|---|---|---|
+| 0, 24 valeurs | 50,24 s | 16,92 s | 2,97 |
+| 2 000 000, 24 valeurs | 11,18 s | 3,91 s | 2,86 |
+| 5 000 000, 40 valeurs | 9,20 s | 3,26 s | 2,82 |
+
+puis 3,05 après le réglage d'occupancy du §7.7.
+
+**Ce n'est pas du throttling** : relevé sous charge, la 5090 tient 2715 MHz à
+575 W, 100 % d'utilisation, 78 °C — au-dessus de son boost nominal. Ramené au
+SM et au cycle, elle est donc à **0,82× la 4070**, et non 1,12. Le doublement du
+débit entier annoncé par Blackwell ne se matérialise pas pour ce noyau. Le
+tableau ci-dessus reste la meilleure explication que j'aie du comportement
+d'Ada ; pour Blackwell il est simplement faux, et je ne sais pas dire pourquoi.
+
+Ce qui survit à la mesure, en revanche, c'est la conclusion sur les cartes de
+datacenter : H100 et A100 ont les mêmes 64 voies INT32 par SM qu'une carte grand
+public pour 6 à 13 fois le prix horaire, et leurs cœurs tensoriels comme leur
+HBM ne servent à rien ici.
 
 ### 7.3  Coût réel sur vast.ai (relevé septembre 2026)
 
 `h GPU` = 772 / rapport. Le coût total ne dépend **que** des heures-GPU : la
-parallélisation n'achète que du temps de calendrier, jamais des euros.
+parallélisation n'achète que du temps de calendrier, jamais des euros. Seule la
+ligne 5090 repose sur une mesure ; les autres rapports restent modélisés, et le
+cas Blackwell montre que le modèle peut se tromper de 30 %.
 
-| GPU | SM × GHz | rapport | h GPU | $/h spot | **coût spot** | $/h à la demande | coût à la demande |
-|---|---|---|---|---|---|---|---|
-| RTX 4070 (référence) | 46 × 2,48 | 1,00 | 772 | — | — | — | — |
-| RTX 3090 | 82 × 1,70 | 1,22 | 632 | 0,12 | 76 $ | 0,20 | 126 $ |
-| RTX 5070 Ti | 70 × 2,45 | 1,69 | 458 | 0,10 | 46 $ | 0,20 | 92 $ |
-| RTX 5080 | 84 × 2,62 | 2,16 | 358 | 0,12 | 43 $ | 0,25 | 90 $ |
-| RTX 4090 | 128 × 2,52 | 2,83 | 272 | 0,11 | **30 $** | 0,25 | 68 $ |
-| **RTX 5090** | **170 × 2,41** | **4,02** | **192** | **0,15** | **29 $** | **0,32** | **61 $** |
-| L40S | 142 × 2,52 | 3,14 | 246 | — | — | 0,55 | 135 $ |
-| A100 80 Go | 108 × 1,41 | 1,34 | 577 | — | — | 0,75 | 433 $ |
-| H100 SXM | 132 × 1,76 | 2,03 | 379 | — | — | 1,65 | 625 $ |
+| GPU | rapport | h GPU | $/h spot | **coût spot** | $/h à la demande | coût |
+|---|---|---|---|---|---|---|
+| RTX 4070 (référence) | 1,00 | 772 | — | — | — | — |
+| RTX 3090 | 1,22 *(modèle)* | 632 | 0,12 | 76 $ | 0,20 | 126 $ |
+| RTX 4090 | 2,83 *(modèle)* | 272 | 0,11 | **30 $** | 0,25 | 68 $ |
+| **RTX 5090** | **3,05 *(mesuré)*** | **253** | 0,20 | **51 $** | 0,336 | 85 $ |
+| H100 SXM | 2,03 *(modèle)* | 379 | — | — | 1,65 | 625 $ |
 
-**La RTX 5090 gagne sur les deux axes à la fois.** Elle coûte le même prix que
-la 4090 (29 $ contre 30 $) tout en allant 1,42× plus vite. Une H100 coûterait
-**21 fois plus cher** pour aller **deux fois moins vite**.
+La 5090 reste le meilleur choix mesuré, mais l'écart avec la 4090 se resserre
+nettement une fois le modèle corrigé : 3,05 contre 2,83, pour un prix spot
+presque double. **Si le rapport 2,83 de la 4090 se confirmait par la mesure,
+elle serait le choix le moins cher** — cela vaut le benchmark à 0,14 $.
 
-Temps de calendrier en louant plusieurs 5090 spot — le coût reste ~29 $ :
+Temps de calendrier avec plusieurs 5090 — le coût reste ~51 $ en spot :
 
-| 5090 en parallèle | 1 | 4 | **8** | 16 | 32 |
+| 5090 en parallèle | 1 | 5 | 10 | **25** | 50 |
 |---|---|---|---|---|---|
-| calendrier | 8,0 j | 2,0 j | **24 h** | 12 h | 6 h |
-
-**Huit instances séparées, pas un nœud 8×.** Pour la même durée de 24 h :
-
-| montage | $/GPU/h | **total** |
-|---|---|---|
-| 8 instances spot séparées | 0,15 | **29 $** |
-| 8 instances à la demande | 0,33 | 63 $ |
-| un seul nœud 8×5090 (256 vCPU, 504 Go) | 0,60 | **115 $** |
-
-Le nœud multi-GPU coûte **4× le prix** pour exactement le même calcul. La prime
-paie un interconnect (NVLink, PCIe entre cartes, RAM partagée) dont ce travail
-n'a strictement aucun usage : zéro communication entre workers, 40 octets de
-sortie par tâche. Elle n'a de sens que pour la commodité — une seule machine à
-configurer, un seul `parts_n31.txt`, `collect.sh` en local. À 86 $ d'écart,
-`run_node.sh` rend le montage à 8 instances assez simple pour ne pas la payer.
+| calendrier | 10,5 j | 2,1 j | 25 h | **10 h** | 5 h |
 
 ### 7.4  Plan recommandé
 
@@ -1069,6 +1075,52 @@ Activer la 2FA ne débloque pas rétroactivement une clé créée avant.
 
 `.env` est en `chmod 600` et exclu par `.gitignore`, comme `state.db`, la paire
 de clés SSH générée et les sommes partielles.
+
+### 7.7  Ce que la première location a appris
+
+Une seule RTX 5090 louée 40 minutes, pour **0,14 $ au total**, a corrigé trois
+choses qu'aucun raisonnement n'aurait trouvées.
+
+**Le rapport annoncé était faux de 32 %** (§7.2). C'est la raison d'être du
+benchmark à 0,14 $ avant d'engager 50 $ : le dimensionnement passe de 19 à
+25 instances pour tenir en 10 h.
+
+**Le noyau débordait des registres sur sm_120.** À 5 blocs/SM — le réglage
+optimal sur Ada — ptxas signale 20 octets de *spill stores* sur Blackwell, et
+40 à 6 blocs. Balayage sur les deux cartes :
+
+| blocs/SM | 2 | 3 | 4 | 5 | 6 |
+|---|---|---|---|---|---|
+| 5090 | 3681 ms | **3676 ms** | 3813 | 3931 *(spill 20 o)* | 3967 *(40 o)* |
+| 4070 | 11143 ms | 11199 ms | 11280 | 11145 | 11290 *(spill 28 o)* |
+
+**3 blocs/SM** supprime le débordement et gagne 6,5 % sur Blackwell, en restant
+dans le bruit sur Ada — c'est désormais le défaut (`LF6_MINBLK`, redéfinissable
+par carte). Gain net : 6,5 % de la facture.
+
+**`--bench` mentait, et de deux façons.** Il annonçait un rapport de 5,8×
+là où le travail identique donnait 3,05×. Deux causes :
+
+* le tirage LCG dégénérait avec le nombre d'échantillons — juste à 64 tirages
+  (778 h contre 772 h réelles), deux fois trop pessimiste à 128 (1589 h). Les
+  bits de poids faible d'un LCG à module 2^32 ont des périodes très courtes ;
+  remplacé par splitmix64 ;
+* il chronométrait un lancement isolé à `count=1`, qui ne charge pas deux
+  cartes de la même façon. Il mesure maintenant le chemin de **production** :
+  même `count` qu'un `--chunk`, recopie et réduction hôte comprises.
+
+Après correction, l'outil recoupe la mesure directe : 48 tirages donnent 728 h
+contre 772 h de vérité terrain, et le rapport apparié 4070/5090 ressort à
+**3,13**, contre 3,05 par le travail identique — 3 % d'écart, là où l'ancienne
+version annonçait 5,8.
+La leçon générale rejoint le §4.7 : sur ce problème, **tout estimateur qui
+n'échantillonne pas uniformément les `vhi` ment**, et le rapport de 409 entre
+le `vhi` le plus cher et le moins cher fait qu'il ment beaucoup.
+
+**Ce qui a marché du premier coup**, en revanche : injection de la clé SSH par
+le script `onstart`, transfert des sources, compilation nvcc en CUDA 12.8 pour
+sm_120, et destruction de l'instance. Le chemin `up` → provisionnement → `down`
+n'avait jamais pu s'exécuter avant faute d'accès API.
 
 ---
 
