@@ -1117,6 +1117,31 @@ La leçon générale rejoint le §4.7 : sur ce problème, **tout estimateur qui
 n'échantillonne pas uniformément les `vhi` ment**, et le rapport de 409 entre
 le `vhi` le plus cher et le moins cher fait qu'il ment beaucoup.
 
+**Une offre bon marché peut être une carte sur-souscrite, et rien ne le dit.**
+Une « RTX 4090 à 0,136 $/h » mesurait **0,85× une 4070** — plus lente qu'une
+carte trois fois plus petite. Le matériel semblait pourtant sain : 2670 MHz,
+441 W sur 450, PCIe gen4 x16, 100 % d'utilisation, et CUDA voyait bien les
+128 SM. L'explication n'apparaît qu'en interrogeant la carte **à l'arrêt** :
+
+```
+$ nvidia-smi --query-gpu=memory.used,utilization.gpu,power.draw --format=csv
+20531 MiB, 100 %, 427.41 W        <- alors que notre calcul ne tourne pas
+$ nvidia-smi --query-compute-apps=gpu_uuid,pid,used_memory --format=csv
+GPU-3a0ffed4…, 2704705, 4126 MiB
+GPU-3a0ffed4…, 3010397, 5470 MiB   <- cinq autres processus,
+GPU-3a0ffed4…, 3673338, 6226 MiB      sur le meme UUID que le notre
+GPU-3a0ffed4…,  898865, 1394 MiB
+GPU-3a0ffed4…,  994518, 3266 MiB
+```
+
+Le prix était le seul indice, et il ne suffit pas. `provision()` interroge donc
+maintenant la carte avant d'accepter la machine et l'écarte au-delà de 2 Go
+occupés ou 25 % d'utilisation : payer un sixième de GPU pendant dix heures coûte
+bien plus cher que de jeter l'instance tout de suite. **Toute mesure de
+comparaison entre cartes est sans valeur si ce contrôle n'a pas été fait** — et
+je ne l'avais pas fait sur la 5090, dont le 3,05 mesuré pourrait donc être un
+plancher.
+
 **Le provisionnement coûte plus cher que prévu.** L'image `nvidia/cuda:…-devel`
 pèse ~6 Go et son téléchargement est facturé comme du calcul. Sur un hôte à
 213 Mbps, une instance est restée dix minutes sans jamais ouvrir son SSH et a dû

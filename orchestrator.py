@@ -204,6 +204,21 @@ def provision(w):
         time.sleep(10)
     else:
         log(f"{w['name']} : SSH injoignable, abandon"); return False
+    # Verifier que la carte est bien A NOUS. Une offre bon marche peut etre une
+    # carte sur-souscrite : une "RTX 4090 a 0,136 $/h" testee le 2026-09-04
+    # portait cinq autres processus sur le meme UUID, 20 Go occupes et 100 %
+    # d'utilisation avant meme qu'on lance quoi que ce soit -- elle mesurait
+    # 0,85x une 4070 au lieu de 2,8x. Refuser la machine coute moins cher que
+    # de payer un sixieme de GPU pendant dix heures.
+    r = ssh_cmd(w, "nvidia-smi --query-gpu=memory.used,utilization.gpu --format=csv,noheader,nounits", timeout=60)
+    try:
+        mem, util = (int(x.strip()) for x in r.stdout.strip().split(",")[:2])
+        if mem > 2000 or util > 25:
+            log(f"{w['name']} : carte deja occupee ({mem} Mo, {util} %) -- ecartee")
+            return False
+    except Exception:
+        log(f"{w['name']} : etat GPU illisible, on continue")
+
     files = [os.path.join(HERE, f) for f in SEND]
     fat = os.path.join(HERE, "langford6.fat")
     if os.path.exists(fat): files.append(fat)

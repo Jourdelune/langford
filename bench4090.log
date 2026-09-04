@@ -1,1 +1,14 @@
 SSH ouvert : ssh4.vast.ai:18204
+NVIDIA GeForce RTX 4090
+=== travail identique (4070 : 50.24 / 11.20 / 9.20 s) ===
+vhi=0 count=24 : 0.00 s
+vhi=2000000 count=24 : 0.00 s
+vhi=5000000 count=40 : 0.00 s
+=== balayage blocs/SM ===
+  blocs/SM=3  9607 ms
+  blocs/SM=4  12964 ms
+  blocs/SM=5  443 ms
+  blocs/SM=6  290 ms
+=== horloge et puissance sous charge ===
+2655 MHz, 420.61 W, 73, 100 %
+FINI
