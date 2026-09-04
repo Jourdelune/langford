@@ -617,6 +617,65 @@ puis 9) : l'écart se creuse. Les positions retenues sont d'ailleurs un préfixe
 fermée, et sa forme dit pourquoi : le signe grassmannien est irréductiblement
 global.
 
+**(j) La contrainte de couleurs tient en UNE équation entière.** C'est le fait le
+plus surprenant que j'aie trouvé. Soit mᵢ la multiplicité de la couleur i ; on a
+toujours Σmᵢ = n. Alors
+
+        sum_j 2^{d_j} = 2^{n+2} − 4     <=>     tous les m_i valent 1
+
+*Preuve.* Parmi toutes les écritures d'un entier N comme Σmᵢ2ⁱ avec mᵢ ≥ 0, la
+représentation **binaire minimise la somme des chiffres** (chaque report
+2^{i+1} → 2·2ⁱ l'augmente de 1). Or 2^{n+2}−4 = 2²+2³+…+2^{n+1} a exactement n
+chiffres à 1, donc l'écriture de somme de chiffres n est unique. ∎
+Vérifié exhaustivement jusqu'à n=12 (`single.c`, 1 352 078 multi-ensembles à
+n=12, zéro contre-exemple).
+
+**Les n bits « quelles couleurs sont utilisées » se réduisent donc à un seul
+scalaire** — qu'on impose par transformée de Fourier, pendant que le comptage
+pondéré des couplages se fait en 2ⁿ (Björklund). Coût = *(portée de la
+statistique)* × 2ⁿ.
+
+Mieux : **quatre sommes de puissances suffisent aussi.** Nombre de
+multi-ensembles partageant p₁…p_k avec l'ensemble plein (`powersums.c`) :
+
+| n | k=1 | k=2 | k=3 | **k=4** |
+|---|---|---|---|---|
+| 9 | 910 | 25 | 3 | **1** |
+| 11 | 9 686 | 178 | 10 | **1** |
+| 13 | 110 780 | 1 403 | 33 | **1** |
+| 15 | 1 328 980 | 11 307 | 129 | **1** |
+
+**Pourquoi ça ne suffit quand même pas.** Toute statistique additive séparante g
+doit distinguer les sommes de tous les sous-ensembles de **même taille** (les
+δ = 1_A − 1_B avec |A| = |B| sont des directions interdites). Cela fait C(n,n/2)
+sommes distinctes dans [0, n·N], où N est la portée, d'où
+
+        N ≥ C(n, n/2) / n ≈ 2ⁿ / n^{1,5}
+
+et un coût total **≥ 4ⁿ/poly** : la route ne peut pas descendre sous le 4ⁿ
+autrement que d'un facteur polynomial. En pratique elle fait pire : Σ2^d a une
+portée n·2^{n+1}, soit un coût 2^{68} pour n=31 contre 2^{62} pour Godfrey ; les
+meilleures constructions connues d'ensembles à sommes de sous-ensembles
+distinctes (Conway–Guy, Erdős) restent en Θ(2ⁿ/√n) ; et les quatre sommes de
+puissances ont une portée n^{14}, bien pire encore.
+
+C'est la formulation la plus nette de la barrière que j'aie trouvée : **la
+contrainte de couleurs est un seul nombre, mais ce nombre a irréductiblement
+n bits.**
+
+**(k) Le mécanisme de Björklund, enfin lu.** Son 2^{V/2} vient d'une opération
+« retirer-remplacer » : on retire les sommets **par paires** et on les remplace
+par une **étiquette** unique, parce qu'un couplage partiel couvre toujours les
+deux sommets retirés ensemble. 2n sommets donnent donc n étiquettes, les
+couplages parfaits deviennent les couvertures exactes de ces n étiquettes, d'où
+un anneau de dimension 2ⁿ et O\*(2ⁿ) **opérations d'anneau**. Sur notre anneau de
+couleurs (dimension 2ⁿ), chaque opération coûte 2ⁿ : on retombe sur 4ⁿ. Les deux
+univers — n étiquettes de positions, n couleurs — sont disjoints, et rien ne les
+identifie. Björklund note lui-même que sa technique « fait un usage profond du
+fait qu'elle compte des couvertures de 2-ensembles » et donne une borne
+conditionnelle expliquant pourquoi elle ne s'étend pas aux 3-ensembles — or notre
+problème est exactement une couverture exacte par 3-ensembles {p, p+i, couleur i}.
+
 ---
 
 ## 6. Est-ce un vrai progrès sur l'état de l'art ?
@@ -813,6 +872,8 @@ carte.
 * `fiber.c` — fibres de la carte d'autocorrélation
 * `parity.c` — l'expérience historique sur la parité des croisements
 * `refl_test.c` — validation de σ = canon(reverse) dans les coordonnées de la v3
+* `single.c` — la contrainte de couleurs comme équation entière unique, §5.4(j)
+* `powersums.c` — combien de sommes de puissances caractérisent l'ensemble plein
 * `partial.c` — plus grand ensemble grassmannien admissible, §5.4(i)
 * `toeplitz.c` — ordre de la récurrence des hafniens de Toeplitz, §5.4(h)
 * `struct.c` — vérification des identités de croisement du §5.4(a) et mesure du
