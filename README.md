@@ -300,6 +300,43 @@ d'entiers économise ~65 instructions sur le papier ; mesuré, c'est **1,85× pl
 lent** (376 → 203 Gsums/s), parce que garder 15 entiers vivants fait déborder le
 fichier de registres. La version qui marche les multiplie deux à deux (§4.4).
 
+### 4.8  Qu'est-ce qui limite vraiment le noyau ? (trois hypothèses, trois mesures)
+
+À 34 jours, la v6 tourne à ~60 % du plafond d'émission de la carte. J'ai testé
+les trois explications possibles ; deux sont fausses, et la troisième dit qu'il
+n'y a plus qu'un levier.
+
+**Hypothèse 1 — déséquilibre des pipes.** Sur Ada le pipe ALU a 64 voies par SM
+et le pipe FMA 128. Le décompte SASS du drain donne **161 instructions ALU contre
+95 FMA** : l'ALU coûte 80 cycles, le FMA 24 — le FMA dort à 30 %. Un décalage à
+droite peut pourtant se faire sur le pipe FMA : `x >> m = __umulhi(x, 2^(32−m))`.
+Appliqué aux 22 décalages des écarts impairs, le mix devient 139 ALU / 117 FMA
+(vérifié : 22 `SHF.R.U32.HI` remplacés par 22 `IMAD.HI.U32`). **Mesure : 4 % plus
+lent** (33,98 → 35,43 jours). Rejeté — et donc le noyau n'est pas au plafond ALU.
+
+**Hypothèse 2 — latence des chaînes de dépendance.** Test direct : faire varier
+le nombre de warps résidents.
+
+| blocs/SM | warps/SM | Gsums/s |
+|---|---|---|
+| 2 | 16 | 288,2 |
+| 3 | 24 | 287,8 |
+| 5 | 40 | 287,4 |
+
+**Identique à 0,3 % près.** Seize warps suffisent déjà à masquer toute la
+latence : le noyau n'est pas latence-lié. (Corollaire pratique : l'occupancy est
+un non-sujet ici, ce qui explique pourquoi aucun réglage de registres n'a jamais
+rien donné.)
+
+**Hypothèse 3 — mémoire partagée.** LSU à ~15 % d'utilisation. Rejeté.
+
+**Conclusion.** Le noyau est à ~80 % du plafond d'émission que lui impose son
+propre mélange d'instructions (une instruction ALU occupe son pipe deux cycles,
+une FMA un seul). Il n'est donc ni à optimiser par l'occupancy, ni par les
+pipes, ni par la mémoire : **seul le nombre d'instructions compte encore**. Et
+il est à 15 % de son plancher, avec les 22 popcounts des écarts impairs
+exactement au minimum et l'arbre de produit à ~1,4× du sien.
+
 ---
 
 ## 5. Pistes de recherche
@@ -471,10 +508,9 @@ d'instructions**. Les 22 popcounts restants des écarts impairs sont exactement
 au minimum (2 SHF, 2 LOP3, 2 POPC, 2 arithmétiques par écart non précalculé) ;
 l'arbre de produit est à ~1,4× du sien.
 
-Le facteur qui reste — 43 % d'émission perdue — n'est *pas* l'occupancy (testé :
-4 contre 5 blocs par SM, identique), ni la mémoire partagée (LSU à ~15 %), mais
-la latence des chaînes de dépendance du drain. C'est le poste sur lequel je n'ai
-pas trouvé de prise.
+Ce qui reste n'est ni l'occupancy, ni les pipes, ni la mémoire — les trois ont
+été testés et éliminés (§4.8). Le noyau est à ~80 % du plafond que lui impose son
+propre mélange ALU/FMA ; seul le nombre d'instructions compte encore.
 
 ---
 
