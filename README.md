@@ -1117,6 +1117,17 @@ La leçon générale rejoint le §4.7 : sur ce problème, **tout estimateur qui
 n'échantillonne pas uniformément les `vhi` ment**, et le rapport de 409 entre
 le `vhi` le plus cher et le moins cher fait qu'il ment beaucoup.
 
+**Le provisionnement coûte plus cher que prévu.** L'image `nvidia/cuda:…-devel`
+pèse ~6 Go et son téléchargement est facturé comme du calcul. Sur un hôte à
+213 Mbps, une instance est restée dix minutes sans jamais ouvrir son SSH et a dû
+être détruite ; sur 25 instances, ce temps mort n'est plus anecdotique. D'où
+deux corrections : `up --min-net` écarte les hôtes mal connectés (défaut
+400 Mbps), et le provisionnement envoie désormais un **binaire prefabriqué de
+2 Mo** compilé pour sm_89 *et* sm_120 — cudart lié en statique, aucune
+dépendance CUDA dynamique — au lieu de lancer `nvcc` sur chaque machine. Il est
+vérifié sur la carte distante (il doit retrouver `L(2,12) = 108144`) avant
+d'être accepté, sinon on retombe sur la compilation.
+
 **Ce qui a marché du premier coup**, en revanche : injection de la clé SSH par
 le script `onstart`, transfert des sources, compilation nvcc en CUDA 12.8 pour
 sm_120, et destruction de l'instance. Le chemin `up` → provisionnement → `down`

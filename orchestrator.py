@@ -105,10 +105,10 @@ def api(method, path, body=None, auth=True):
                 "      ./orchestrator.py run\n")
         raise SystemExit(f"API {method} {path} -> {e.code} {txt}")
 
-def offers(kind="on-demand", limit=40, gpu="RTX 5090"):
+def offers(kind="on-demand", limit=40, gpu="RTX 5090", min_net=100):
     q = {"gpu_name": {"eq": gpu}, "num_gpus": {"eq": 1}, "rentable": {"eq": True},
          "cuda_max_good": {"gte": 12.8}, "reliability2": {"gte": 0.95},
-         "inet_down": {"gte": 100}, "type": kind,
+         "inet_down": {"gte": min_net}, "type": kind,
          "order": [["dph_total", "asc"]], "limit": limit}
     return api("PUT", "search/asks/", {"q": q}, auth=False).get("offers", [])
 
@@ -162,7 +162,13 @@ def lease(c, worker, k, secs):
         c.execute("BEGIN IMMEDIATE")
         rows = c.execute(
             "SELECT id FROM tasks WHERE status!='done' "
-            "AND (status='pending' OR lease<?) ORDER BY tries, RANDOM() LIMIT ?",
+            # Les taches de petit indice sont les plus lourdes (la loi
+            # d'equilibrage les sous-estime : vhi=0 coute 2,09 s/vhi mesure
+            # contre 0,66 predit). Les servir en premier, c'est la regle LPT,
+            # qui minimise la duree totale sur machines paralleles : une tache
+            # longue tiree en fin de course allongerait la queue pour tout le
+            # monde. RANDOM() faisait exactement l'inverse.
+            "AND (status='pending' OR lease<?) ORDER BY tries, CAST(id AS INTEGER) LIMIT ?",
             (now, k)).fetchall()
         ids = [r[0] for r in rows]
         if ids:
@@ -270,7 +276,7 @@ def ensure_key():
 
 def cmd_offers(a):
     for kind in (["bid"] if a.bid else ["on-demand", "bid"]):
-        o = offers(kind, limit=a.count, gpu=a.gpu)
+        o = offers(kind, limit=a.count, gpu=a.gpu, min_net=a.min_net)
         print(f"\n=== {kind} : {len(o)} offres ===")
         print(f"{'offre':>10} {'$/h':>6} {'min':>6} {'cuda':>5} {'fiab':>5} {'net':>6}  lieu")
         for x in o[:a.count]:
@@ -331,7 +337,7 @@ def cmd_up(a):
     onstart = ("mkdir -p /root/.ssh && echo '%s' >> /root/.ssh/authorized_keys && "
                "chmod 700 /root/.ssh && chmod 600 /root/.ssh/authorized_keys" % pub)
     kind = "bid" if a.bid else "on-demand"
-    offs = offers(kind, limit=300, gpu=a.gpu)
+    offs = offers(kind, limit=300, gpu=a.gpu, min_net=a.min_net)
     if not offs: sys.exit("aucune offre 5090 disponible")
     c = db(); made = 0
     seen = {r[0] for r in c.execute("SELECT inst FROM workers WHERE inst IS NOT NULL")}
@@ -456,13 +462,16 @@ def show(c, n, T):
     d, l, p = (c.execute("SELECT COUNT(*) FROM tasks WHERE status=?", (s,)).fetchone()[0]
                for s in ("done", "leased", "pending"))
     tot = d + l + p
-    row = c.execute("SELECT AVG(secs) FROM (SELECT secs FROM tasks WHERE status='done' "
-                    "ORDER BY rowid DESC LIMIT 200)").fetchone()[0]
-    rate = c.execute("SELECT SUM(1.0/spv) FROM workers WHERE spv>0 AND state='running'").fetchone()[0]
+    # Debit agrege : chaque worker fournit 1/per_task(spv) taches par seconde.
+    # (L'ancienne formule melangeait des secondes par vhi et des taches ; elle
+    #  annoncait 0,4 h la ou il en restait plus de mille.)
     eta = ""
-    if rate and d:
-        left = spv_from(row, n, T) * (tot - d) / rate if row else 0
-        eta = f"   ETA {left/3600:.1f} h"
+    thr = 0.0
+    for (spv,) in c.execute("SELECT spv FROM workers WHERE spv>0 AND state='running'"):
+        pt = per_task(spv, n, T)
+        if pt > 0: thr += 1.0 / pt
+    if thr > 0:
+        eta = f"   ETA {(tot - d) / thr / 3600:.1f} h"
     log(f"faites {d}/{tot} ({100*d/tot:.1f} %)  en cours {l}  attente {p}{eta}")
 
 def cmd_status(a):
@@ -496,9 +505,9 @@ def main():
     q = S.add_parser("init");   q.add_argument("-n", type=int, default=31); q.add_argument("-T", type=int, default=8192); q.set_defaults(f=cmd_init)
     q = S.add_parser("plan");   q.add_argument("--hours", type=float, default=10); q.add_argument("--ratio", type=float, default=3.05); q.add_argument("--base", type=float, default=772); q.set_defaults(f=cmd_plan)
     q = S.add_parser("offers"); q.add_argument("--count", type=int, default=12); q.add_argument("--bid", action="store_true")
-    q.add_argument("--gpu", default="RTX 5090"); q.set_defaults(f=cmd_offers)
+    q.add_argument("--gpu", default="RTX 5090"); q.add_argument("--min-net", dest="min_net", type=float, default=100); q.set_defaults(f=cmd_offers)
     q = S.add_parser("up");     q.add_argument("--count", type=int, required=True); q.add_argument("--bid", type=float, default=0); q.add_argument("--max-price", type=float, default=0.40)
-    q.add_argument("--gpu", default="RTX 5090"); q.set_defaults(f=cmd_up)
+    q.add_argument("--gpu", default="RTX 5090"); q.add_argument("--min-net", dest="min_net", type=float, default=400); q.set_defaults(f=cmd_up)
     q = S.add_parser("tfa")
     q.add_argument("--code"); q.add_argument("--backup"); q.add_argument("--secret")
     q.add_argument("--method", default="totp", choices=["totp", "sms", "email"])
