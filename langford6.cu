@@ -185,17 +185,27 @@ template<int N> __device__ __forceinline__ int rowP(uint32_t r,int m){
     for (int k=0;k<8;k++){                                                     \
         int xv0, xv1;                                                          \
         { const int m=2*k+1;                                                   \
-          if (m > MO) xv0 = (m==MO+1) ? sgn : 1;                               \
-          else { const int L1=N-m, L2=N-m-1;                                   \
-            int s1=__popc((o2 ^ (e2>>m)) & ((1u<<L1)-1u));                      \
-            int s2=(L2>0)?__popc((e2 ^ (o2>>(m+1))) & ((1u<<L2)-1u)):0;         \
-            xv0 = L1 + (L2>0?L2:0) - 2*(s1+s2); } }                            \
+          if (m > MO) xv0 = (m==MO+1) ? sgn : 1;                            \
+          else if (m >= K+1) {   /* R(m) precalculee : independante de e_lo */  \
+            const int L2=N-m-1, q=m-(K+1);                                      \
+            const int Rc=(int)(short)(sPw[t2][5+(q>>1)]>>(16*(q&1)));            \
+            const int s2=(L2>0)?__popc((e2 ^ (o2>>(m+1))) & ((1u<<L2)-1u)):0;    \
+            xv0 = Rc + (L2>0?L2:0) - 2*s2; }                                \
+          else { const int L1=N-m, L2=N-m-1;                                     \
+            const int s1=__popc((o2 ^ (e2>>m)) & ((1u<<L1)-1u));                 \
+            const int s2=(L2>0)?__popc((e2 ^ (o2>>(m+1))) & ((1u<<L2)-1u)):0;    \
+            xv0 = L1 + (L2>0?L2:0) - 2*(s1+s2); } }                          \
         { const int m=2*k+2;                                                   \
-          if (m > MO) xv1 = (m==MO+1) ? sgn : 1;                               \
-          else { const int L1=N-m, L2=N-m-1;                                   \
-            int s1=__popc((o2 ^ (e2>>m)) & ((1u<<L1)-1u));                      \
-            int s2=(L2>0)?__popc((e2 ^ (o2>>(m+1))) & ((1u<<L2)-1u)):0;         \
-            xv1 = L1 + (L2>0?L2:0) - 2*(s1+s2); } }                            \
+          if (m > MO) xv1 = (m==MO+1) ? sgn : 1;                            \
+          else if (m >= K+1) {   /* R(m) precalculee : independante de e_lo */  \
+            const int L2=N-m-1, q=m-(K+1);                                      \
+            const int Rc=(int)(short)(sPw[t2][5+(q>>1)]>>(16*(q&1)));            \
+            const int s2=(L2>0)?__popc((e2 ^ (o2>>(m+1))) & ((1u<<L2)-1u)):0;    \
+            xv1 = Rc + (L2>0?L2:0) - 2*s2; }                                \
+          else { const int L1=N-m, L2=N-m-1;                                     \
+            const int s1=__popc((o2 ^ (e2>>m)) & ((1u<<L1)-1u));                 \
+            const int s2=(L2>0)?__popc((e2 ^ (o2>>(m+1))) & ((1u<<L2)-1u)):0;    \
+            xv1 = L1 + (L2>0?L2:0) - 2*(s1+s2); } }                          \
         p8[k] = xv0*xv1;                                                       \
     }                                                                          \
     uint32_t z[5]; prod160m(ev,p8,z);                                          \
@@ -219,7 +229,7 @@ void oe_kernel(uint32_t vhi0, uint32_t vcnt, uint32_t blk0, uint32_t * __restric
 
     __shared__ uint32_t sT[NL][5];   /* stride 5 : anti-conflit de bancs */     /* Q(e) empaquete SWAR, biais 64 */
     __shared__ uint32_t sB[NS*WP];     /* bitmaps par (lag, valeur)     */
-    __shared__ uint32_t sPw[256][5]; /* idem */   /* P(o) de chaque thread         */
+    __shared__ uint32_t sPw[256][9]; /* +4 mots : les R(m) constants */   /* P(o) de chaque thread         */
     __shared__ uint32_t sQ[8][64];     /* file des survivants, par warp */
 
     const int tid = threadIdx.x;
@@ -259,6 +269,21 @@ void oe_kernel(uint32_t vhi0, uint32_t vcnt, uint32_t blk0, uint32_t * __restric
 
     for (uint32_t vv = 0; vv < vcnt; vv++) {
         const uint32_t vhi = vhi0 + vv;
+        /* R(m) = sum_j O_j E_{j+m} porte sur les indices E de m+1 a N ; e_lo
+         * occupe les cases 2..K+1, donc pour m >= K+1 cette correlation ne
+         * depend PAS de e_lo : elle est constante pour tout le bloc interne.
+         * On la calcule une fois par (thread, e_hi) et on economise 8 des 30
+         * popcounts du drain.                                              */
+        {   const uint32_t e0 = (vhi<<K)<<1;
+            #pragma unroll
+            for (int m=K+1; m<=MO; m++){
+                const int L1=N-m;
+                const int R = L1 - 2*__popc((o ^ (e0>>m)) & ((1u<<L1)-1u));
+                const int q = m-(K+1);
+                if (q&1) sPw[tid][5+(q>>1)] |= ((uint32_t)(R & 0xFFFF))<<16;
+                else     sPw[tid][5+(q>>1)]  =  ((uint32_t)(R & 0xFFFF));
+            }
+        }
         __syncthreads();
         /* --- phase 1 : table Q (biais 64) --- */
         for (int el = tid; el < NL; el += 256) {

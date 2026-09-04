@@ -6,19 +6,19 @@ nombres. Exhiber une solution est trivial ; les compter toutes est un problème
 ouvert au-delà de n=28.
 
 Ce dépôt contient une implémentation CUDA de la méthode algébrique de Godfrey,
-poussée jusqu'à **5,90× plus vite** que mon point de départ, avec au passage la
+poussée jusqu'à **5,30× plus vite** que mon point de départ, avec au passage la
 fermeture — par preuve ou par mesure — de trois pistes qui étaient jusque-là
 seulement « non abouties ».
 
 | | n=24 | n=27 | n=28 | **n=31** |
 |---|---|---|---|---|
-| point de départ (v3) | 15,8 min | 16,9 h | 2,81 j | 180 j |
-| **v6 (ce dépôt)** | **2,7 min** | **2,86 h** | **11,4 h** | **≈ 30,5 j** |
+| point de départ (v3) | 15,9 min | 16,9 h | 2,82 j | 180,1 j |
+| **v6 (ce dépôt)** | **3,0 min** | **3,18 h** | **12,7 h** | **≈ 34,0 j** |
 
 **Ce qui est fait** : le record publié de 2015 — L(28), obtenu sur ~32 GPU en
-9 jours — se refait ici en **11,4 heures sur une seule RTX 4070**.
+9 jours — se refait ici en **12,7 heures sur une seule RTX 4070**.
 **Ce qui ne l'est pas** : L(2,31) reste inconnu. Ce dépôt n'a pas battu le
-record ; il en a divisé le coût par ~600.
+record ; il en a divisé le coût par ~545.
 
 ---
 
@@ -168,15 +168,15 @@ Tous les débits sont mesurés GPU au repos, moyennés sur des shards répartis
 
 | version | Gsums/s | n=31 | gain |
 |---|---|---|---|
-| v3 — Godfrey + symétrie ×8 | 37,1 | 180,1 j | — |
-| v4 — saut des termes nuls | 66,5 | 100,4 j | ×1,79 |
-| v5 — demi-état + déroulage | 92,1 | 72,4 j | ×2,49 |
-| **v6 — parité + bitmaps de survie** | **437,4\*** | **30,5 j** | **×5,90** |
+| v3 — Godfrey + symétrie ×8 | 37,0 | 180,1 j | — |
+| v4 — saut des termes nuls | 65,6 | 101,7 j | ×1,77 |
+| v5 — demi-état + déroulage | 89,0 | 75,0 j | ×2,40 |
+| **v6 — parité + bitmaps de survie** | **392,7\*** | **34,0 j** | **×5,30** |
 
 \* la v6 énumère 2^{2n−2} points nominaux dont la moitié n'est jamais lancée ;
 le débit est rapporté à ce total nominal.
 
-### 4.1 v4 — ne pas calculer les produits nuls (×1,79)
+### 4.1 v4 — ne pas calculer les produits nuls (×1,77)
 
 Mesure décisive : en remplaçant l'arbre de produit par une addition triviale, le
 noyau passe de 37 à 126,5 Gsums/s — **le produit 160 bits est 70,6 % du temps**.
@@ -191,7 +191,7 @@ les 16 écarts pairs sont regroupés dans 4 mots SWAR (expanseur de pas 2
 `((v>>s)&0x55)*0x104104 & 0x04040404`, même nombre d'instructions), et le signe
 du terme voyage dans la voie 31 inutilisée sous forme ±1.
 
-### 4.2 v5 — ne suivre que la moitié de l'état (×1,39 de plus)
+### 4.2 v5 — ne suivre que la moitié de l'état (×1,36 de plus)
 
 Seuls les écarts pairs décident de la survie ; les 15 impairs ne servent qu'à la
 valeur du produit, soit 12,9 % du temps. La boucle chaude ne maintient donc que
@@ -200,7 +200,7 @@ moment du drain. Plus un déroulage par 8 : j = ctz(t+1) vaut 0,1,0,2,0,1,0,dyn
 sur un bloc de 8 pas, donc 7 pas sur 8 adressent la banque de constantes avec un
 décalage littéral.
 
-### 4.3 v6 — supprimer la boucle chaude (×2,37 de plus)
+### 4.3 v6 — supprimer la boucle chaude (×2,21 de plus)
 
 C'est le saut structurel. Grâce à la décomposition de parité (§2.2), on
 précalcule pour chaque écart *m* et chaque valeur atteignable *v* le **bitmap
@@ -211,7 +211,7 @@ instructions par point à **moins d'une**. Il n'y a plus de code de Gray du tout
 La réflexion reparamétrée (§2.3) rend le prédicat canonique `v ≤ u`, ce qui
 permet de **ne pas lancer** les blocs sans travail.
 
-### 4.4 v6 finale — creuser le drain (×1,15 de plus)
+### 4.4 Creuser le drain
 
 Une fois la boucle chaude supprimée, tout est dans le drain. Décomposition
 mesurée : produit 64 %, écarts impairs 55 %, base 30 % (les parts se recouvrent,
@@ -229,9 +229,20 @@ le noyau masquant de la latence).
   nécessaires, avec pour seule correction
   `a_s·b_s = a_u·b_u − 2^w(s_a·b_u + s_b·a_u)`. −24 instructions et une branche.
 
-Drain final : **301 instructions SASS par point survivant**.
+### 4.5 Les corrélations que `e_lo` ne touche pas
 
-### 4.5 Essayé, mesuré, sans gain
+R(m) = Σⱼ Oⱼ E_{j+m} porte sur les indices E de m+1 à N, et `e_lo` n'occupe que
+les cases 2..K+1. Donc **pour m ≥ K+1 cette corrélation ne dépend pas du tout de
+`e_lo`** : elle est constante sur tout le bloc interne. Avec K=7 cela concerne
+8 des 15 écarts, soit 8 des 30 popcounts du drain. On les calcule une fois par
+(thread, e_hi) et on les range en int16 dans `sPw`. Gain mesuré : **+4,4 %**.
+
+Balayage de K : plus K est petit, plus de corrélations deviennent constantes,
+mais moins la construction des tables s'amortit. K=7 reste l'optimum.
+
+Drain final : **287 instructions SASS par point survivant**.
+
+### 4.6 Essayé, mesuré, sans gain
 
 * **Trafic de file vectorisé 128 bits** (`STS.128`/`LDS.128`) : la file n'est pas
   le goulot.
@@ -254,7 +265,7 @@ Drain final : **301 instructions SASS par point survivant**.
   (C_m = 2N−2m−1 − 2(R+R')), donc un `__popcll` sur un mot 64 bits assemblé
   suffirait — sauf que `__popcll` est déjà compilé en deux POPC et une addition.
 
-### 4.6 Trois pièges de mesure, et une leçon d'architecture
+### 4.7 Quatre pièges de mesure, et une leçon d'architecture
 
 Ils m'ont coûté plusieurs heures et sont reproductibles :
 
@@ -270,6 +281,18 @@ Ils m'ont coûté plusieurs heures et sont reproductibles :
    3 806 Gsums/s selon `vhi` ; seule l'intégrale sur toute la plage a un sens.
 3. **La contention.** Une validation en tâche de fond fausse toute mesure de
    débit. Vérifier `nvidia-smi` avant chaque campagne.
+4. **Les `vhi` de faible poids de Hamming sont dégénérés.** `vhi = 2²²` donne un
+   `e_hi` presque nul, donc les mêmes autocorrélations extrêmes qu'à `vhi = 0` :
+   le même binaire mesure 141 Gsums/s en `vhi = 4 194 304` et 441 en
+   `vhi = 4 200 000`. Échantillonner des points isolés est donc invalide — il
+   faut moyenner sur des **fenêtres de `vhi` contigus**. Toutes les mesures de ce
+   README sont refaites avec ce protocole (fenêtres de 25 à 32, six positions
+   réparties) ; il donne des chiffres ~15 % moins flatteurs que les points
+   isolés, et reproductibles à 0,3 % près sur la v3.
+
+Corollaire : la v3 est facile à mesurer parce que son coût est uniforme (elle
+calcule tous les produits) ; à partir de la v4 le coût dépend des données, donc
+la mesure devient un problème en soi.
 
 Et la leçon : **l'empaquetage SWAR n'est pas du gaspillage, c'est de la
 compression de registres.** Passer les 15 écarts impairs à l'arbre sous forme
@@ -403,12 +426,12 @@ dernier point du record publié :
 | | matériel | temps | GPU-jours |
 |---|---|---|---|
 | Assarpour, Bar-Noy & Liu (2015) | ~32 GPU Kepler | ~9 jours | ~288 |
-| **ce dépôt (v6)** | 1 × RTX 4070 | **11,4 h** | **0,48** |
+| **ce dépôt (v6)** | 1 × RTX 4070 | **12,7 h** | **0,53** |
 
-soit **~600× moins de GPU-jours**. Une part revient au matériel : un GPU Kepler
+soit **~545× moins de GPU-jours**. Une part revient au matériel : un GPU Kepler
 de 2013 délivre ~1,3·10¹² opérations entières/s contre 7,3·10¹² pour une 4070
 (≈ 1,5·10¹³ en comptant le pipe FMA), soit un facteur **6 à 11**. Le reste —
-**environ 55 à 100×** — vient de l'algorithme et de l'implémentation : symétrie
+**environ 50 à 90×** — vient de l'algorithme et de l'implémentation : symétrie
 d'ordre 8 complète, saut des 87 % de produits nuls, décomposition de parité,
 bitmaps de survie, et une arithmétique 160 bits tronquée plutôt que du CRT
 modulaire.
@@ -418,10 +441,10 @@ changé, c'est son prix :
 
 | | avant | maintenant |
 |---|---|---|
-| sur une 4070 | 180 jours | **30,5 jours** |
-| sur une RTX 4090 | ~67 jours | **~11,3 jours** |
-| en location grand public (~0,35 $/h) | ~560 $ | **~95 $** |
-| en parallèle | ~26 GPU pendant une semaine | **~4,4 GPU pendant une semaine** |
+| sur une 4070 | 180 jours | **34,0 jours** |
+| sur une RTX 4090 | ~67 jours | **~12,6 jours** |
+| en location grand public (~0,35 $/h) | ~560 $ | **~106 $** |
+| en parallèle | ~26 GPU pendant une semaine | **~5 GPU pendant une semaine** |
 
 Le record passe d'une allocation de calcul intensif à un budget individuel.
 C'est un changement de **classe d'accessibilité**, pas de classe de complexité.
@@ -437,15 +460,21 @@ de refaire ces chemins.
 
 | | n=31 |
 |---|---|
-| **v6, mesurée** | **30,5 j** |
-| même code à 100 % d'émission (inatteignable) | 20,0 j |
-| compte d'instructions à son minimum (~256/survivant), à 100 % | 17,4 j |
+| **v6, mesurée** | **34,0 j** |
+| même code à 100 % d'émission (inatteignable) | 19,2 j |
+| compte d'instructions à son minimum (~250/survivant), à 100 % | 17,1 j |
 
-43,8 instructions par point canonique, 218,7 Gsums/s canoniques → 9,6·10¹²
-instructions/s contre un plafond d'émission de 1,46·10¹³ : **66 % du plafond de
-la carte**, et **18 % au-dessus du plancher d'instructions**. Les 30 popcounts
-des écarts impairs sont exactement au minimum (8 instructions par écart : 2 SHF,
-2 LOP3, 2 POPC, 2 arithmétiques) ; l'arbre de produit est à 1,4× du sien.
+42 instructions par point canonique (0,129 × 287 de drain, plus ~5 de base),
+196,4 Gsums/s canoniques → 8,25·10¹² instructions/s contre un plafond d'émission
+de 1,46·10¹³ : **57 % du plafond de la carte**, et **15 % au-dessus du plancher
+d'instructions**. Les 22 popcounts restants des écarts impairs sont exactement
+au minimum (2 SHF, 2 LOP3, 2 POPC, 2 arithmétiques par écart non précalculé) ;
+l'arbre de produit est à ~1,4× du sien.
+
+Le facteur qui reste — 43 % d'émission perdue — n'est *pas* l'occupancy (testé :
+4 contre 5 blocs par SM, identique), ni la mémoire partagée (LSU à ~15 %), mais
+la latence des chaînes de dépendance du drain. C'est le poste sur lequel je n'ai
+pas trouvé de prise.
 
 ---
 
@@ -521,17 +550,17 @@ constantes et des résultats négatifs.
 
 ## 7. Budget pour n=31
 
-Débit effectif mesuré : 437,4 Gsums/s (2^{2n−2} points nominaux).
+Débit effectif mesuré : 392,7 Gsums/s (2^{2n−2} points nominaux).
 
 | n | v3 | v4 | v5 | **v6** |
 |---|---|---|---|---|
-| 24 | 15,8 min | 8,8 min | 6,4 min | **2,7 min** |
-| 27 | 16,9 h | 9,4 h | 6,8 h | **2,86 h** |
-| 28 | 2,81 j | 1,57 j | 1,13 j | **11,4 h** |
-| **31** | 180 j | 100 j | 72 j | **≈ 30,5 j** |
-| 32 | 2,0 ans | 1,1 an | 0,79 an | **≈ 122 j** |
+| 24 | 15,9 min | 9,0 min | 6,6 min | **3,0 min** |
+| 27 | 16,9 h | 9,5 h | 7,0 h | **3,18 h** |
+| 28 | 2,82 j | 1,59 j | 1,17 j | **12,7 h** |
+| **31** | 180,1 j | 101,7 j | 75,0 j | **≈ 34,0 j** |
+| 32 | 1,97 an | 1,11 an | 0,82 an | **≈ 136 j** |
 
-Tout l'état de l'art publié (L(27) + L(28)) se refait en **14 heures** sur cette
+Tout l'état de l'art publié (L(27) + L(28)) se refait en **16 heures** sur cette
 carte.
 
 ---
