@@ -176,7 +176,7 @@ def worker_loop(w, n, T):
     """Un fil par worker : bail -> calcul -> validation immediate, en boucle.
     Chaque fil ouvre sa propre connexion : SQLite interdit de la partager."""
     c = db()
-    if w["kind"] == "vast" and not provision(w): return
+    if w["kind"] != "local" and not provision(w): return
     log(f"{w['name']} : pret")
     spv = w.get("spv") or 0.35
     while not STOP.is_set() and remaining(c):
@@ -254,8 +254,8 @@ def cmd_bench(a):
     rows = list(c.execute("SELECT name,kind,host,port,state FROM workers"))
     for name, kind, host, port, state in rows:
         w = dict(name=name, kind=kind, host=host, port=port)
-        if kind == "vast":
-            if state != "running" or not host: log(f"{name} : {state}, ignore"); continue
+        if kind != "local":
+            if not host: log(f"{name} : pas d'adresse SSH, ignore"); continue
             if not provision(w): continue
             r = ssh_cmd(w, f"cd /root && ./langford6 -n {n} --bench {a.samples}", timeout=3600)
             out = r.stdout
@@ -299,15 +299,37 @@ def cmd_up(a):
         if iid in seen: continue
         name = f"vast{iid}"
         c.execute("INSERT OR REPLACE INTO workers(name,kind,inst,price,state,seen) "
-                  "VALUES(?,'vast',?,?,'new',?)", (name, iid, off["dph_total"], time.time()))
+                  "VALUES(?,'ssh',?,?,'new',?)", (name, iid, off["dph_total"], time.time()))
         log(f"loue {name}  {off['dph_total']:.3f} $/h  {off.get('geolocation')}")
         made += 1
     log(f"{made} instance(s) creee(s)")
 
+def cmd_sshkey(a):
+    pub = ensure_key()
+    print("Cle publique de l'orchestrateur -- a coller dans la console vast.ai\n"
+          "(Account -> SSH Keys -> New), puis louer les instances a la main :\n")
+    print(pub)
+
+def cmd_add(a):
+    """Enregistre une instance louee a la main. Accepte soit --host/--port, soit
+    directement la ligne 'Connect' que donne la console vast.ai."""
+    host, port = a.host, a.port
+    if a.ssh:
+        m = re.search(r"-p\s*(\d+).*?root@([\w.\-]+)", a.ssh) or \
+            re.search(r"root@([\w.\-]+).*?-p\s*(\d+)", a.ssh)
+        if not m: sys.exit("ligne SSH incomprise : attendu 'ssh -p PORT root@HOTE'")
+        g = m.groups()
+        port, host = (int(g[0]), g[1]) if g[0].isdigit() else (int(g[1]), g[0])
+    if not host or not port: sys.exit("il faut --ssh '...' ou --host H --port P")
+    c = db(); name = a.name or f"ssh{port}"
+    c.execute("INSERT OR REPLACE INTO workers(name,kind,host,port,price,state,seen) "
+              "VALUES(?,'ssh',?,?,?,'running',?)", (name, host, port, a.price, time.time()))
+    log(f"{name} -> root@{host}:{port}")
+
 def refresh(c):
     """Recolle les adresses SSH depuis l'API et retire les instances mortes."""
     inst = {i["id"]: i for i in api("GET", "instances/").get("instances", [])}
-    for name, iid in c.execute("SELECT name,inst FROM workers WHERE kind='vast'").fetchall():
+    for name, iid in c.execute("SELECT name,inst FROM workers WHERE inst IS NOT NULL").fetchall():
         i = inst.get(iid)
         if not i:
             c.execute("UPDATE workers SET state='gone' WHERE name=?", (name,)); continue
@@ -337,7 +359,7 @@ def cmd_run(a):
     ws = []
     for r in c.execute("SELECT name,kind,inst,host,port,state,spv FROM workers").fetchall():
         w = dict(zip("name kind inst host port state spv".split(), r))
-        if w["kind"] == "vast" and (a.local_only or w["state"] != "running" or not w["host"]): continue
+        if w["kind"] != "local" and (a.local_only or not w["host"]): continue
         ws.append(w)
     log(f"{len(ws)} worker(s) : " + ", ".join(w["name"] for w in ws))
     th = [threading.Thread(target=worker_loop, args=(w, n, T), daemon=True) for w in ws]
@@ -372,7 +394,7 @@ def cmd_status(a):
 
 def cmd_down(a):
     c = db()
-    for name, iid in c.execute("SELECT name,inst FROM workers WHERE kind='vast' AND inst IS NOT NULL"):
+    for name, iid in c.execute("SELECT name,inst FROM workers WHERE inst IS NOT NULL AND state!='destroyed'"):
         try:
             api("DELETE", f"instances/{iid}/", {})
             log(f"detruit {name}")
@@ -396,6 +418,8 @@ def main():
     q = S.add_parser("plan");   q.add_argument("--hours", type=float, default=10); q.add_argument("--ratio", type=float, default=4.02); q.add_argument("--base", type=float, default=772); q.set_defaults(f=cmd_plan)
     q = S.add_parser("offers"); q.add_argument("--count", type=int, default=12); q.add_argument("--bid", action="store_true"); q.set_defaults(f=cmd_offers)
     q = S.add_parser("up");     q.add_argument("--count", type=int, required=True); q.add_argument("--bid", type=float, default=0); q.add_argument("--max-price", type=float, default=0.40); q.set_defaults(f=cmd_up)
+    q = S.add_parser("sshkey"); q.set_defaults(f=cmd_sshkey)
+    q = S.add_parser("add");    q.add_argument("--ssh"); q.add_argument("--host"); q.add_argument("--port", type=int); q.add_argument("--name"); q.add_argument("--price", type=float, default=0.35); q.set_defaults(f=cmd_add)
     q = S.add_parser("bench"); q.add_argument("--samples", type=int, default=96); q.set_defaults(f=cmd_bench)
     q = S.add_parser("run");    q.add_argument("--local-only", action="store_true"); q.set_defaults(f=cmd_run)
     q = S.add_parser("status"); q.set_defaults(f=cmd_status)
