@@ -198,10 +198,25 @@ def provision(w):
         time.sleep(10)
     else:
         log(f"{w['name']} : SSH injoignable, abandon"); return False
+    files = [os.path.join(HERE, f) for f in SEND]
+    fat = os.path.join(HERE, "langford6.fat")
+    if os.path.exists(fat): files.append(fat)
     subprocess.run(["scp", "-i", KEYF, "-o", "StrictHostKeyChecking=no",
                     "-o", "UserKnownHostsFile=/dev/null", "-o", "LogLevel=ERROR",
-                    "-P", str(w["port"])] + [os.path.join(HERE, f) for f in SEND] +
-                   [f"root@{w['host']}:/root/"], check=True, timeout=300)
+                    "-P", str(w["port"])] + files +
+                   [f"root@{w['host']}:/root/"], check=True, timeout=600)
+    # On prefere un binaire prefabrique couvrant sm_89 et sm_120 : 2 Mo, cudart
+    # lie en statique, aucune dependance CUDA dynamique. Cela evite une minute
+    # de nvcc facturee sur chaque instance -- et permettrait a terme une image
+    # `base` de 200 Mo au lieu de la `devel` de 6 Go. On verifie qu'il tourne
+    # vraiment sur la carte distante ; sinon on retombe sur la compilation.
+    if os.path.exists(fat):
+        r = ssh_cmd(w, "cd /root && chmod +x *.sh langford6.fat && "
+                       "mv -f langford6.fat langford6 && ./langford6 -n 12 2>/dev/null | tail -1",
+                    timeout=180)
+        if "108144" in r.stdout:          # L(2,12) : le binaire calcule juste ici
+            log(f"{w['name']} : binaire prefabrique operationnel"); return True
+        log(f"{w['name']} : binaire prefabrique inutilisable, compilation")
     r = ssh_cmd(w, "cd /root && chmod +x *.sh && nvcc -O3 -arch=native -o langford6 langford6.cu 2>&1 | tail -3 && ls -l langford6", timeout=900)
     if r.returncode != 0 or "langford6" not in r.stdout:
         log(f"{w['name']} : compilation echouee : {(r.stdout + r.stderr)[-300:]}"); return False
@@ -255,7 +270,7 @@ def ensure_key():
 
 def cmd_offers(a):
     for kind in (["bid"] if a.bid else ["on-demand", "bid"]):
-        o = offers(kind, limit=a.count)
+        o = offers(kind, limit=a.count, gpu=a.gpu)
         print(f"\n=== {kind} : {len(o)} offres ===")
         print(f"{'offre':>10} {'$/h':>6} {'min':>6} {'cuda':>5} {'fiab':>5} {'net':>6}  lieu")
         for x in o[:a.count]:
@@ -316,7 +331,7 @@ def cmd_up(a):
     onstart = ("mkdir -p /root/.ssh && echo '%s' >> /root/.ssh/authorized_keys && "
                "chmod 700 /root/.ssh && chmod 600 /root/.ssh/authorized_keys" % pub)
     kind = "bid" if a.bid else "on-demand"
-    offs = offers(kind, limit=300)
+    offs = offers(kind, limit=300, gpu=a.gpu)
     if not offs: sys.exit("aucune offre 5090 disponible")
     c = db(); made = 0
     seen = {r[0] for r in c.execute("SELECT inst FROM workers WHERE inst IS NOT NULL")}
@@ -480,8 +495,10 @@ def main():
     S = P.add_subparsers(dest="cmd", required=True)
     q = S.add_parser("init");   q.add_argument("-n", type=int, default=31); q.add_argument("-T", type=int, default=8192); q.set_defaults(f=cmd_init)
     q = S.add_parser("plan");   q.add_argument("--hours", type=float, default=10); q.add_argument("--ratio", type=float, default=3.05); q.add_argument("--base", type=float, default=772); q.set_defaults(f=cmd_plan)
-    q = S.add_parser("offers"); q.add_argument("--count", type=int, default=12); q.add_argument("--bid", action="store_true"); q.set_defaults(f=cmd_offers)
-    q = S.add_parser("up");     q.add_argument("--count", type=int, required=True); q.add_argument("--bid", type=float, default=0); q.add_argument("--max-price", type=float, default=0.40); q.set_defaults(f=cmd_up)
+    q = S.add_parser("offers"); q.add_argument("--count", type=int, default=12); q.add_argument("--bid", action="store_true")
+    q.add_argument("--gpu", default="RTX 5090"); q.set_defaults(f=cmd_offers)
+    q = S.add_parser("up");     q.add_argument("--count", type=int, required=True); q.add_argument("--bid", type=float, default=0); q.add_argument("--max-price", type=float, default=0.40)
+    q.add_argument("--gpu", default="RTX 5090"); q.set_defaults(f=cmd_up)
     q = S.add_parser("tfa")
     q.add_argument("--code"); q.add_argument("--backup"); q.add_argument("--secret")
     q.add_argument("--method", default="totp", choices=["totp", "sms", "email"])
