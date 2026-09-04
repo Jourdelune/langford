@@ -545,6 +545,39 @@ sommande ne dépend alors que du spectre. Malheureusement le nombre de spectres
 distincts d'une suite ±1 vaut ~2^{2n}/(4n) : aucun gain exponentiel. Et de toute
 façon Langford est aperiodique.
 
+**(h) Hafniens de Toeplitz.** L'inclusion-exclusion sur les couleurs donne
+exactement
+
+        compte arc-en-ciel  =  sum_{S} (-1)^{n-|S|} · haf(A_S)
+
+où A_S est la matrice d'adjacence du graphe des positions dont les écarts sont
+dans S. Or **ces matrices sont de Toeplitz** : A_S[p][q] ne dépend que de p−q.
+Si le hafnien d'une Toeplitz 0/1 était calculable en temps polynomial, le tout
+tomberait à **2ⁿ·poly** — et le 4ⁿ avec.
+
+Il y a une raison d'espérer : sur un chemin, la matrice de transfert de la DP à
+fenêtre est **la même à chaque position**. Donc la suite N_S(k) = nombre de
+couplages parfaits sur [1..k] satisfait une récurrence linéaire. Si son ordre
+était petit, on calculerait quelques termes pour de petits k — où la fenêtre est
+étroite et la DP bon marché — puis on extrapolerait jusqu'à k = 2n.
+
+Mesure de l'ordre minimal par Berlekamp-Massey (`toeplitz.c`) :
+
+| S | fenêtre | états | ordre de la récurrence |
+|---|---|---|---|
+| {2,3} | 3 | 8 | **8** |
+| {2..4} | 4 | 16 | **16** |
+| {2..5} | 5 | 32 | **32** |
+| {2..6} | 6 | 64 | **64** |
+| {2..7} | 7 | 128 | **128** |
+| {2..8} | 8 | 256 | **256** |
+| {2..9} | 9 | 512 | **512** |
+
+**L'ordre vaut exactement le nombre d'états** : le polynôme minimal de la matrice
+de transfert est de degré plein, il n'y a aucune compression à en tirer.
+Extrapoler coûterait autant que dérouler la DP. Piste morte, et pour une raison
+structurelle nette.
+
 ---
 
 ## 6. Est-ce un vrai progrès sur l'état de l'art ?
@@ -741,6 +774,7 @@ carte.
 * `fiber.c` — fibres de la carte d'autocorrélation
 * `parity.c` — l'expérience historique sur la parité des croisements
 * `refl_test.c` — validation de σ = canon(reverse) dans les coordonnées de la v3
+* `toeplitz.c` — ordre de la récurrence des hafniens de Toeplitz, §5.4(h)
 * `struct.c` — vérification des identités de croisement du §5.4(a) et mesure du
   certificat de décès du §5.4(b)
 * `zfrac.c` — fraction de produits non nuls
