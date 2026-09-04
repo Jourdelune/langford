@@ -676,6 +676,55 @@ fait qu'elle compte des couvertures de 2-ensembles » et donne une borne
 conditionnelle expliquant pourquoi elle ne s'étend pas aux 3-ensembles — or notre
 problème est exactement une couverture exacte par 3-ensembles {p, p+i, couleur i}.
 
+**(l) Godfrey est optimal dans son propre cadre.** Toute méthode « poids local »
+calcule Σ_s ∏_p g(v_p), où v_p est le nombre de cordes couvrant la position p et
+g encode la contrainte de couverture. Si g s'écrit comme somme de K
+exponentielles, g(v) = Σ_{k=1..K} c_k λ_k^v, alors
+
+    Σ_s ∏_p g(v_p) = Σ_{k : [2n]→[K]} (∏_p c_{k_p}) · ∏_i ( Σ_s λ_{k_s} λ_{k_{s+i}} )
+
+— la somme sur les placements **factorise par couleur**, et c'est exactement ce
+qui rend les couleurs gratuites chez Godfrey. Le prix est une somme sur K^{2n}
+étiquetages, donc **coût = K^{2n}**.
+
+Quel est le K minimal ? g doit valoir 1 en v=1 et annuler tout le reste, ce qui
+sur {0,…,n} demanderait a priori n+1 exponentielles. Mais la contrainte
+**globale** Σ_p v_p = 2n (n cordes, deux positions chacune) permet de se
+contenter de g(v) = [v impair] : 2n exposants impairs de somme 2n valent tous 1.
+Et [v impair] = (1 − (−1)^v)/2, soit **K = 2**, λ ∈ {+1, −1}. Une g avec K=1 est
+de la forme c·λ^v, jamais nulle en v=0 sans l'être partout : K=1 est impossible.
+
+**Donc K = 2 est le minimum, Godfrey l'atteint, et 4ⁿ est optimal dans ce cadre.**
+En sortir demande de corréler les étiquettes entre positions — c'est la DP à
+fenêtre, de largeur arborescente ≥ n−3, donc 2ⁿ — mais les couleurs cessent
+alors d'être gratuites et coûtent 2ⁿ à leur tour. 4ⁿ des deux côtés.
+
+---
+
+### 5.5  Récapitulatif : quatre formulations de la barrière
+
+Après avoir fermé quatorze voies, voici ce que je crois comprendre du 4ⁿ. Ce ne
+sont pas quatre obstacles indépendants mais quatre visages du même.
+
+1. **Permanent contre déterminant.** Le compte est un hafnien mixte ; son
+   analogue signé, le discriminant mixte, se calcule en 2ⁿ·poly. Kasteleyn est
+   le seul pont connu, et il est absent ici — démontré en ±1, en U(1) jusqu'à
+   Z/2³², dans sa généralisation à d formes linéaires (d ≈ 2,8n), et en
+   grassmannisation partielle (|A| ≤ 6 quand il en faudrait > n).
+2. **Deux univers de n bits, disjoints.** Björklund réduit les 2n positions à n
+   étiquettes ; les couleurs en font n de plus ; rien ne les identifie. La DP
+   jointe a un état mesuré à 2^{1,90n} et des transitions à 2^{2,07n}.
+3. **La contrainte de couleurs est un seul nombre à n bits.** Elle se réduit à
+   Σ2^{d_j} = 2^{n+2}−4, mais toute statistique additive séparante a une portée
+   ≥ 2ⁿ/n^{1,5}, donc l'imposer par Fourier coûte 2ⁿ — et 2ⁿ·2ⁿ = 4ⁿ.
+4. **Godfrey est optimal dans le cadre des poids locaux**, avec K = 2 minimal.
+
+La conclusion que j'en tire : casser le 4ⁿ demanderait un mécanisme qui traite la
+couverture et la distinction des écarts **sans que les deux exponentielles se
+multiplient**. La structure particulière du problème — la couleur d'une arête est
+déterminée par ses extrémités — est la seule prise qui reste, et je n'ai pas su
+en faire quelque chose.
+
 ---
 
 ## 6. Est-ce un vrai progrès sur l'état de l'art ?
@@ -872,6 +921,7 @@ carte.
 * `fiber.c` — fibres de la carte d'autocorrélation
 * `parity.c` — l'expérience historique sur la parité des croisements
 * `refl_test.c` — validation de σ = canon(reverse) dans les coordonnées de la v3
+* `framework.c` — optimalité de Godfrey dans le cadre des poids locaux, §5.4(l)
 * `single.c` — la contrainte de couleurs comme équation entière unique, §5.4(j)
 * `powersums.c` — combien de sommes de puissances caractérisent l'ensemble plein
 * `partial.c` — plus grand ensemble grassmannien admissible, §5.4(i)
