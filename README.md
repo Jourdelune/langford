@@ -1853,11 +1853,40 @@ nettement une fois le modèle corrigé : 3,05 contre 2,83, pour un prix spot
 presque double. **Si le rapport 2,83 de la 4090 se confirmait par la mesure,
 elle serait le choix le moins cher** — cela vaut le benchmark à 0,14 $.
 
-Temps de calendrier avec plusieurs 4090 — le coût reste ~23 $ en spot :
+**Sur une seule 4090 : 204,9 h GPU, soit 8,5 jours.** Le coût ne dépendant que
+des heures-GPU, il reste **~23 $ en spot** quel que soit le nombre de cartes ;
+n'achète du parallélisme que le temps de calendrier.
 
-| 4090 en parallèle | 1 | 5 | 10 | **25** | 50 |
-|---|---|---|---|---|---|
-| calendrier | 8,5 j | 1,7 j | 20 h | **8,2 h** | 4,1 h |
+| 4090 en parallèle | 1 | 4 | 8 | **17** | 25 | 50 |
+|---|---|---|---|---|---|---|
+| calendrier (avec la 4070 locale) | 6,2 j | 46,8 h | 24,5 h | **11,8 h** | 8,1 h | 4,1 h |
+
+**Pour un résultat en 12 heures : 17 cartes suffisent au nominal, 19 sont
+prudentes.** Le total de 545 h porte ±8 % (§7.1), et c'est cette incertitude qui
+décide, pas l'arrondi :
+
+| hypothèse sur le total | cartes pour tenir 12 h |
+|---|---|
+| optimiste, 501 h (−8 %) | 16 |
+| **mesuré, 545 h** | **17** |
+| pessimiste, 589 h (+8 %) | **19** |
+
+| cartes | calendrier si 545 h | si 589 h |
+|---|---|---|
+| 17 | 11,8 h | 12,7 h — *dépasse* |
+| 18 | 11,2 h | 12,0 h |
+| **19** | **10,6 h** | **11,4 h** |
+| 20 | 10,1 h | 10,9 h |
+
+Trois choses que ces tableaux ne disent pas et qui coûtent du calendrier :
+une instance spot préemptée reperd sa tâche en cours (~3 min avec T = 4096) ;
+chaque location met ~4 min à démarrer avec l'image `base` (§7.4) ; et une carte
+sur-souscrite mesure 0,85× une 4070 au lieu de 2,66× (§7.7) — `provision()` la
+refuse, mais elle a été payée. **19 cartes** absorbent les trois.
+
+**Et si l'on veut le résultat défendable plutôt que rapide** (§3.3bis), il faut
+dupliquer le run : **34 cartes pour 11,9 h**, ~45 $ en spot. C'est le seul
+scénario que je recommanderais pour un chiffre destiné à être publié.
 
 *Le rapport 5090/4070 de 3,05 reste celui de la v6.1 ; il mériterait d'être
 remesuré sur la v7, c'est le même benchmark à 0,03 $.*
