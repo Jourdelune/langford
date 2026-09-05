@@ -748,7 +748,8 @@ pourraient encore rapporter :
   la compaction et le balayage y pèsent forcément plus lourd maintenant que le
   drain a fondu.
 * **Le rapport 5090/4070 (§7.2, §7.3)**, mesuré sur la v6.1. Le mélange
-  d'instructions a changé ; le rapport aussi, peut-être.
+  d'instructions a changé ; le rapport aussi, peut-être. *(Le rapport 4090,
+  lui, est maintenant mesuré sur la v7 : 2,66, §7.3.)*
 
 ### 4.11  Où va le temps (profil mesuré sur la v6.1)
 
@@ -1566,41 +1567,71 @@ payer un silicium qu'il n'utilisera pas.
 
 ### 7.3  Coût réel sur vast.ai (relevé septembre 2026)
 
-`h GPU` = 586 / rapport. Le coût total ne dépend **que** des heures-GPU : la
-parallélisation n'achète que du temps de calendrier, jamais des euros. Seule la
-ligne 5090 repose sur une mesure ; les autres rapports restent modélisés, et le
-cas Blackwell montre que le modèle peut se tromper de 30 %.
+`h GPU` = 545 / rapport, où 545 h est la mesure directe de la v7 sur la 4070
+(`--bench 96`). Le coût total ne dépend **que** des heures-GPU : la
+parallélisation n'achète que du temps de calendrier, jamais des euros. Les
+lignes 4090 et 5090 reposent désormais **toutes deux sur une mesure** ; les
+autres rapports restent modélisés.
 
 | GPU | rapport | h GPU | $/h spot | **coût spot** | $/h à la demande | coût |
 |---|---|---|---|---|---|---|
-| RTX 4070 (référence) | 1,00 | 586 | — | — | — | — |
-| RTX 3090 | 1,22 *(modèle)* | 480 | 0,12 | 58 $ | 0,20 | 96 $ |
-| RTX 4090 | 2,83 *(modèle)* | 207 | 0,11 | **23 $** | 0,25 | 52 $ |
-| **RTX 5090** | **3,05 *(mesuré)*** | **192** | 0,20 | **38 $** | 0,336 | 65 $ |
-| H100 SXM | 2,03 *(modèle)* | 289 | — | — | 1,65 | 477 $ |
+| RTX 4070 (référence) | 1,00 | 545 | — | — | — | — |
+| RTX 3090 | 1,22 *(modèle)* | 447 | 0,12 | 54 $ | 0,20 | 89 $ |
+| **RTX 4090** | **2,66 *(mesuré)*** | **205** | 0,11 | **23 $** | 0,25 | 51 $ |
+| RTX 5090 | 3,05 *(mesuré sur la v6.1)* | 179 | 0,20 | 36 $ | 0,336 | 60 $ |
+| H100 SXM | 2,03 *(modèle)* | 268 | — | — | 1,65 | 443 $ |
+
+> **RTX 4090 : rapport 2,66, mesuré le 2026-09-05.** Le §7.2 le modélisait à
+> 2,83 ; l'écart est de 6 %, très loin des 32 % du cas Blackwell. Protocole :
+> même binaire (le `.fat` sm_89+sm_120), même échantillon de `vhi`
+> (`--bench 96`, graine fixe des deux côtés), carte vérifiée libre avant la
+> mesure (1 Mo occupé, 0 % d'utilisation — le piège des cartes sur-souscrites
+> du §7.7). 4070 : 545,1 h / 0,2339 s/vhi. 4090 : 204,8 h / 0,0879 s/vhi.
+>
+> **Et la réponse à la question ouverte du §7.3 est oui** : à prix spot la 4090
+> est le choix le moins cher (23 $ contre 36 $), parce que son rabais spot est
+> plus profond que son déficit de débit. La 5090 reste le meilleur choix si
+> c'est le temps de calendrier qui compte.
+>
+> Réserve honnête : le rapport 5090 de 3,05 a été mesuré **sur la v6.1**. La v7
+> a changé le mélange d'instructions (plus de `prmt` et de `LDS.64`, plus aucun
+> `popc` dans le drain) ; le 2,66 de la 4090, lui, est mesuré sur la v7. Les
+> deux lignes ne sont donc pas strictement comparables.
 
 La 5090 reste le meilleur choix mesuré, mais l'écart avec la 4090 se resserre
 nettement une fois le modèle corrigé : 3,05 contre 2,83, pour un prix spot
 presque double. **Si le rapport 2,83 de la 4090 se confirmait par la mesure,
 elle serait le choix le moins cher** — cela vaut le benchmark à 0,14 $.
 
-Temps de calendrier avec plusieurs 5090 — le coût reste ~38 $ en spot :
+Temps de calendrier avec plusieurs 4090 — le coût reste ~23 $ en spot :
 
-| 5090 en parallèle | 1 | 5 | 10 | **25** | 50 |
+| 4090 en parallèle | 1 | 5 | 10 | **25** | 50 |
 |---|---|---|---|---|---|
-| calendrier | 8,0 j | 1,6 j | 19 h | **7,7 h** | 3,8 h |
+| calendrier | 8,5 j | 1,7 j | 20 h | **8,2 h** | 4,1 h |
 
-*Le rapport 5090/4070 de 3,05 a été mesuré sur la v6.1 ; il est repris tel quel
-ici. La v7 déplace le mélange d'instructions (plus de `prmt` et de `LDS.64`,
-plus aucun `popc` dans le drain), donc ce rapport mériterait d'être remesuré
-avant une grosse location — c'est le même benchmark à 0,03 $ qu'au §7.4.*
+*Le rapport 5090/4070 de 3,05 reste celui de la v6.1 ; il mériterait d'être
+remesuré sur la v7, c'est le même benchmark à 0,03 $.*
 
 ### 7.4  Plan recommandé
 
-1. **Louer une seule 5090 spot dix minutes (≈ 0,03 $)** et lancer
-   `./langford6 -n 31 --bench 64`. Le rapport de 4,02 ci-dessus est un *modèle*
-   d'architecture ; ce test le remplace par une *mesure*, sur le même échantillon
-   de `vhi` que la 4070. Tout le reste du budget en découle.
+1. **Louer une seule carte spot dix minutes (≈ 0,03 $)** et lancer
+   `./langford6 -n 31 --bench 96`. C'est ainsi qu'ont été obtenus les deux
+   rapports mesurés du §7.3 (5090 : 3,05 sur la v6.1 ; 4090 : 2,66 sur la v7),
+   et c'est ce qui reste à faire pour la 5090 sur la v7. Tout le reste du
+   budget en découle.
+
+   Deux pièges rencontrés, tous deux coûteux en temps :
+   * **louer ne démarre pas.** Une instance vast naît avec
+     `intended_status=stopped` : elle télécharge son image puis reste là, et son
+     port SSH refuse la connexion indéfiniment. `orchestrator.py up` demande
+     maintenant le démarrage explicitement ; sans cela, l'attente est infinie.
+   * **l'image `devel` coûte plus cher que le calcul.** Ses 6 Go mettent plus de
+     25 minutes à se télécharger sur certains hôtes. Le binaire préfabriqué
+     `langford6.fat` étant lié en statique (`-cudart static`, sm_89 + sm_120),
+     l'image `base` de 200 Mo suffit : instance prête en ~3 minutes.
+     `up --image devel` remet l'ancienne si l'on veut compiler sur place. Elle
+     doit être en **ubuntu24.04** : la 22.04 (glibc 2.35) refuse un `.fat`
+     compilé sur une machine récente.
 2. Choisir le nombre de workers selon le temps voulu, puis lancer
    `./worker.sh <i> <W> 31 4096` sur chacun (4096 tâches ≈ 2,8 min chacune sur
    une 5090 ; avec 8 cartes, 512 tâches par carte).

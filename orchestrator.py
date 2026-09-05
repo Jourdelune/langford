@@ -40,7 +40,17 @@ HERE   = os.path.dirname(os.path.abspath(__file__))
 DB     = os.path.join(HERE, "state.db")
 KEYF   = os.path.join(HERE, ".ssh_orch")
 API    = "https://console.vast.ai/api/v0/"
-IMAGE  = "nvidia/cuda:12.8.1-devel-ubuntu22.04"   # sm_120 exige CUDA >= 12.8
+# Image par defaut : `base` (~200 Mo) et non `devel` (~6 Go).  Le binaire
+# prefabrique `langford6.fat` est lie en STATIQUE (`-cudart static`) et couvre
+# sm_89 + sm_120 : il n'a besoin que du pilote, pas du toolkit.  Mesure : la
+# `devel` met plus de 25 min a se telecharger sur certains hotes -- plus que le
+# calcul lui-meme.  `--image devel` remet l'ancienne si l'on veut compiler sur
+# place (indispensable pour une architecture non couverte par le .fat).
+# ubuntu24.04 et non 22.04 : le .fat est compile sur une machine a glibc
+# recente, et l'image 22.04 (glibc 2.35) le refuse -- "GLIBC_2.38 not found".
+IMAGE_BASE  = "nvidia/cuda:12.8.1-base-ubuntu24.04"
+IMAGE_DEVEL = "nvidia/cuda:12.8.1-devel-ubuntu24.04"   # sm_120 exige CUDA >= 12.8
+IMAGE  = IMAGE_BASE
 SEND   = ["langford6.cu", "build.sh", "run_shard.sh", "run_batch.sh"]
 LOCK   = threading.Lock()
 STOP   = threading.Event()
@@ -380,7 +390,8 @@ def cmd_up(a):
     for off in offs:
         if made >= a.count: break
         if a.max_price and off["dph_total"] > a.max_price: continue
-        body = {"client_id": "me", "image": IMAGE, "disk": 12, "runtype": "ssh",
+        img = IMAGE_DEVEL if getattr(a, "image", "base") == "devel" else IMAGE_BASE
+        body = {"client_id": "me", "image": img, "disk": 12, "runtype": "ssh",
                 "onstart": onstart, "env": {}}
         if a.bid: body["price"] = round(max(off.get("min_bid", 0) * 1.05, a.bid), 4)
         try: r = api("PUT", f"asks/{off['id']}/", body)
@@ -391,9 +402,18 @@ def cmd_up(a):
         iid = r.get("new_contract")
         if iid in seen: continue
         name = f"vast{iid}"
+        # Louer ne DEMARRE pas : l'instance nait avec intended_status=stopped,
+        # elle telecharge l'image puis reste la, et son port SSH refuse la
+        # connexion indefiniment.  Mesure du 2026-09-05 : trois locations
+        # perdues a attendre un SSH qui ne viendrait jamais.  On demande donc
+        # explicitement le demarrage -- apres quoi le SSH repond en secondes.
+        try:
+            api("PUT", f"instances/{iid}/", {"state": "running"})
+        except SystemExit as e:
+            log(f"{name} : demarrage refuse ({e})")
         c.execute("INSERT OR REPLACE INTO workers(name,kind,inst,price,state,seen) "
                   "VALUES(?,'ssh',?,?,'new',?)", (name, iid, off["dph_total"], time.time()))
-        log(f"loue {name}  {off['dph_total']:.3f} $/h  {off.get('geolocation')}")
+        log(f"loue {name}  {off['dph_total']:.3f} $/h  {off.get('geolocation')}  (demarrage demande)")
         made += 1
     log(f"{made} instance(s) creee(s)")
 
@@ -543,6 +563,8 @@ def main():
     q = S.add_parser("offers"); q.add_argument("--count", type=int, default=12); q.add_argument("--bid", action="store_true")
     q.add_argument("--gpu", default="RTX 5090"); q.add_argument("--min-net", dest="min_net", type=float, default=100); q.add_argument("--verified", action="store_true"); q.set_defaults(f=cmd_offers)
     q = S.add_parser("up");     q.add_argument("--count", type=int, required=True); q.add_argument("--bid", type=float, default=0); q.add_argument("--max-price", type=float, default=0.40)
+    q.add_argument("--image", choices=["base", "devel"], default="base",
+                   help="base (200 Mo, exige langford6.fat) ou devel (6 Go, compile sur place)")
     q.add_argument("--gpu", default="RTX 5090"); q.add_argument("--min-net", dest="min_net", type=float, default=400); q.add_argument("--verified", action="store_true"); q.set_defaults(f=cmd_up)
     q = S.add_parser("tfa")
     q.add_argument("--code"); q.add_argument("--backup"); q.add_argument("--secret")
