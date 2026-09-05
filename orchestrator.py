@@ -132,13 +132,17 @@ def db():
     c = sqlite3.connect(DB, timeout=60, isolation_level=None)
     c.execute("PRAGMA journal_mode=WAL")      # survit a un kill -9 du maitre
     c.execute("PRAGMA synchronous=FULL")      # ... et a une coupure de courant
+    # Migration : les bases d'avant la tracabilite n'ont pas la colonne `prov`.
+    try: c.execute("ALTER TABLE tasks ADD COLUMN prov TEXT")
+    except sqlite3.OperationalError: pass     # deja la, ou table pas encore creee
     return c
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta(k TEXT PRIMARY KEY, v TEXT);
 CREATE TABLE IF NOT EXISTS tasks(
   id TEXT PRIMARY KEY, status TEXT NOT NULL DEFAULT 'pending',
-  lease REAL DEFAULT 0, worker TEXT, part TEXT, secs REAL, tries INTEGER DEFAULT 0);
+  lease REAL DEFAULT 0, worker TEXT, part TEXT, secs REAL, tries INTEGER DEFAULT 0,
+  prov TEXT);
 CREATE INDEX IF NOT EXISTS i_status ON tasks(status, lease);
 CREATE TABLE IF NOT EXISTS workers(
   name TEXT PRIMARY KEY, kind TEXT, inst INTEGER, host TEXT, port INTEGER,
@@ -205,10 +209,10 @@ def part_ok(part, n):
         return False
     return len(part) == 44 and v % (1 << ((n + 1) // 2)) == 0
 
-def finish(c, tid, part, secs, worker):
+def finish(c, tid, part, secs, worker, prov=None):
     with LOCK:
-        c.execute("UPDATE tasks SET status='done', part=?, secs=?, worker=? WHERE id=?",
-                  (part, secs, worker, tid))
+        c.execute("UPDATE tasks SET status='done', part=?, secs=?, worker=?, prov=? WHERE id=?",
+                  (part, secs, worker, prov, tid))
         c.execute("UPDATE workers SET ndone=ndone+1, seen=? WHERE name=?", (time.time(), worker))
 
 def remaining(c):
@@ -295,11 +299,13 @@ def worker_loop(w, n, T):
                                      stdout=subprocess.PIPE, text=True, bufsize=1)
             for line in p.stdout:                      # au fil de l'eau : une
                 f = line.split()                       # coupure ne perd que la
-                if len(f) == 2 and f[0] != "ERR":      # tache en cours
+                if len(f) >= 2 and f[0] != "ERR":      # tache en cours
                     if not part_ok(f[1], n):           # rejetee : le bail
                         log(f"{w['name']} : tache {f[0]} REJETEE ({f[1]})")
                         continue                       # expire, elle repart
-                    finish(c, f[0], f[1], (time.time() - t0) / max(got + 1, 1), w["name"])
+                    prov = f[2] if len(f) > 2 else None   # tracabilite (run_batch.sh)
+                    finish(c, f[0], f[1], (time.time() - t0) / max(got + 1, 1),
+                           w["name"], prov)
                     got += 1
             p.wait(timeout=60)
         except Exception as e:
@@ -553,6 +559,20 @@ def cmd_down(a):
         except SystemExit as e: log(f"{name} : {e}")
         c.execute("UPDATE workers SET state='destroyed' WHERE name=?", (name,))
 
+def cmd_export(a):
+    """Ecrit parts_n<N>.txt au format attendu par audit.sh et collect.sh :
+    `#<tache> <somme> <provenance>`.  Utilisable EN COURS de run -- c'est aussi
+    la sauvegarde hors-SQLite du travail deja fait."""
+    c = db(); n = int(meta(c, "n"))
+    out = os.path.join(HERE, f"parts_n{n}.txt")
+    rows = list(c.execute("SELECT id, part, prov FROM tasks WHERE status='done' ORDER BY id"))
+    with open(out, "w") as fh:
+        for tid, part, prov in rows:
+            fh.write(f"#{tid} {part} {prov or 'sha:?,gpu:?'}\n")
+    log(f"{len(rows)} tache(s) ecrite(s) dans {out}")
+    tot = c.execute("SELECT COUNT(*) FROM tasks").fetchone()[0]
+    if len(rows) < tot: log(f"  (run incomplet : {tot - len(rows)} tache(s) restante(s))")
+
 def cmd_merge(a):
     c = db(); n = int(meta(c, "n"))
     miss = c.execute("SELECT COUNT(*) FROM tasks WHERE status!='done'").fetchone()[0]
@@ -587,6 +607,7 @@ def main():
     q = S.add_parser("run");    q.add_argument("--local-only", action="store_true"); q.set_defaults(f=cmd_run)
     q = S.add_parser("status"); q.set_defaults(f=cmd_status)
     q = S.add_parser("down");   q.set_defaults(f=cmd_down)
+    q = S.add_parser("export"); q.set_defaults(f=cmd_export)
     q = S.add_parser("merge");  q.set_defaults(f=cmd_merge)
     a = P.parse_args(); a.f(a)
 

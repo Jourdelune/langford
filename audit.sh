@@ -48,8 +48,8 @@ echo "  binaire local actuel : sha256 $(sha256sum ./langford6 | cut -c1-16)"
 
 echo ""
 echo "--- 4. cartes et pilotes -----------------------------------"
-grep -o 'gpu:[^ ]*' "$F" | sort | uniq -c | sed 's/^/  /'
-grep -o 'drv:[^ ]*' "$F" | sort | uniq -c | sed 's/^/  /'
+grep -o 'gpu:[^ ,]*' "$F" | sort | uniq -c | sed 's/^/  /'
+grep -o 'drv:[^ ,]*' "$F" | sort | uniq -c | sed 's/^/  /'
 
 echo ""
 echo "--- 5. recalcul redondant d'un echantillon -----------------"
