@@ -56,3 +56,9 @@ tensorcheck
 
 # caches Python (dashboard.py importe orchestrator.py)
 __pycache__/
+
+# dossiers de preuve generes par finalize.py
+preuve_n*/
+preuve_n*.tar.gz
+.instances.json
+.instances.json.fait
