@@ -1,0 +1,11 @@
+# Valeurs de reference : sommes partielles produites DEUX FOIS, par le noyau GPU
+# et par slice_ref (algorithme classique), et identiques au bit pres.
+# Format : n  vhi  somme (poids 2, moitie canonique)   -- cf. README §3.2c
+# Verifiables par ./check_refs.sh (GPU) ou ./check_refs.sh ref (algo classique).
+31 0        2f608fd7:b7a1f766:d3ce9b3f:99aebb38:08000000
+31 4194304  9c8f6671:62e2f40e:8c30d79a:eb8cdb2b:48000000
+31 8388607  e4d775be:143d6853:f88bf9c3:5f90e9e5:c8000000
+28 1048575  fffeb84b:1fe955eb:74462f13:059828b1:77400000
+27 524287   fffffd17:c7e8428b:b3dbf5d2:eff1920f:ba400000
+24 65535    ffffffff:ffd5d6f8:5b23b6fe:7b8715a8:9f300000
+20 63       00000000:00000000:000001fb:e3903b72:a8a40000

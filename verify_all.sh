@@ -36,6 +36,9 @@ SL="11:0 12:3 15:1 16:7 19:1 20:63 23:32767 24:65535 27:524287 28:1048575 31:838
 [ "$MODE" = full ] && SL="$SL 23:30000 24:60000 31:8385000 31:8380000"
 chk ./check_slices.sh $SL
 
+say "4bis. valeurs de reference du README (§3.2c)"
+chk ./check_refs.sh
+
 say "5. l'echelle complete n = 1 a 24"
 chk ./ladder.sh
 

@@ -111,6 +111,15 @@ le prédicat devient **v ≤ u** : les blocs sans travail ne sont jamais lancés
 
 ## 3. Pourquoi le résultat est valide
 
+> **En une phrase.** L'identité de Godfrey est vérifiée contre une force brute à
+> tous les n de 1 à 16, la couverture de l'énumération est prouvée en Lean *et*
+> vérifiée exhaustivement sur les 1,07·10⁹ index de n=31, et neuf tranches de
+> n=31 — dont les deux régimes extrêmes et le milieu exact — sont identiques au
+> bit près à un recalcul par l'**algorithme classique**. Le risque qu'il reste
+> une erreur *systématique* est bien en dessous de 1 %. Le risque dominant n'est
+> pas là : c'est le **matériel sans ECC** sur 205 heures-GPU, et la seule parade
+> complète est de **dupliquer le run** (~23 $ de plus, §3.3bis).
+
 ### 3.1 Ce qui est démontré
 
 1. **L'identité de Godfrey.** F homogène de degré 2n en 2n variables ⟹ la somme
@@ -205,6 +214,26 @@ Les deux régimes extrêmes du §4.7 — celui où presque tout survit et celui 
 presque tout est élagué — sont donc vérifiés au bit près **à n=31**, ainsi que
 le milieu. Le seul reproche qui subsiste est de porter sur neuf valeurs de
 `vhi` sur 8 388 608, pas sur la couverture des cas de figure.
+
+**Valeurs de référence, à recouper sans rien relancer.** Ces sommes partielles
+sont produites *deux fois*, par le noyau GPU et par l'algorithme classique, et
+coïncident bit à bit. Quiconque implémente Godfrey doit retrouver exactement
+ceci — c'est un jeu de tests utilisable indépendamment de ce dépôt :
+
+| n | `vhi` | somme partielle (poids 2, moitié canonique) |
+|---|---|---|
+| 31 | 0 | `2f608fd7:b7a1f766:d3ce9b3f:99aebb38:08000000` |
+| 31 | 4194304 | `9c8f6671:62e2f40e:8c30d79a:eb8cdb2b:48000000` |
+| 31 | 8388607 | `e4d775be:143d6853:f88bf9c3:5f90e9e5:c8000000` |
+| 28 | 1048575 | `fffeb84b:1fe955eb:74462f13:059828b1:77400000` |
+| 27 | 524287 | `fffffd17:c7e8428b:b3dbf5d2:eff1920f:ba400000` |
+| 24 | 65535 | `ffffffff:ffd5d6f8:5b23b6fe:7b8715a8:9f300000` |
+| 20 | 63 | `00000000:00000000:000001fb:e3903b72:a8a40000` |
+
+Ce tableau n'est pas recopié à la main : il vit dans `refvals.txt`, et
+`./check_refs.sh` le recalcule (`./check_refs.sh ref` le refait par l'algorithme
+classique). `verify_all.sh` l'inclut, donc une faute de transcription dans le
+README ferait échouer la chaîne.
 
 **(d) Les valeurs connues, de bout en bout.** n = 11, 12, 15, 16, 19, 20, 23, 24
 reproduites à l'unité près par le binaire courant.
@@ -354,9 +383,13 @@ Contrôles individuels :
 ./ladder.sh                     # l'echelle 1..24, n par n, avec sa couverture
 ./verify 16                     # Godfrey vs force brute, n = 1..16
 ./cover_check 9 31 12           # couverture exacte, exhaustive, jusqu'a n=31
-./slice_ref 31 8388607          # une tranche recalculee depuis la definition
+./slice_ref 31 8388607          # une tranche par l'ALGORITHME CLASSIQUE
 ./langford6 -n 31 --from 8388607 --count 1 --chunk 1   # la meme, par le GPU
 ./check_slices.sh 31:8388607 28:1048575 27:524287      # comparaison au bit pres
+
+# les deux regimes extremes de n=31, plus couteux mais a portee :
+OMP_NUM_THREADS=18 ./slice_ref 31 4194304   # milieu exact   ~8 min sur 18 fils
+OMP_NUM_THREADS=18 ./slice_ref 31 0         # shard degenere ~15 min
 (cd proof && lean Langford.lean)                       # la preuve
 ```
 
@@ -2038,9 +2071,11 @@ Les briques de plus bas niveau, si besoin :
 * `cover_check.c` — le **pont preuve ↔ code** : la couverture exacte vérifiée
   exhaustivement sur l'indexation réelle du noyau, jusqu'à 1,07·10⁹ index à
   n=31 (§3.2b)
-* `slice_ref.c` — recalcule une tranche `PART=` **depuis la définition de
-  Godfrey**, sans parité ni SWAR ni PTX ; `check_slices.sh` compare au bit près
-  (§3.2c)
+* `slice_ref.c` — recalcule une tranche `PART=` par l'**algorithme classique**
+  (Godfrey nu, sans parité ni SWAR ni PTX ; OpenMP) ; `check_slices.sh` compare
+  au bit près (§3.2c)
+* `refvals.txt` / `check_refs.sh` — les valeurs de référence du §3.2c, et leur
+  vérification automatique par le GPU ou par l'algorithme classique
 * `audit.sh` — dossier d'audit d'une campagne : complétude, empreintes des
   binaires, cartes, et **recalcul redondant d'un échantillon** (§3.6)
 * `proof/Langford.lean` — **preuve Lean 4** que l'énumération du noyau couvre
