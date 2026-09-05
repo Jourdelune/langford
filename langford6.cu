@@ -15,6 +15,53 @@
  *
  * Le groupe de Klein devient "negation independante de chaque rangee", donc
  * on epingle o_1 = e_1 = 0 et on multiplie par 4 (verifie par oe_ref.c).
+ *
+ * ---------------------------------------------------------------------
+ * v7 -- les ecarts IMPAIRS deviennent eux aussi une somme de deux tables.
+ *
+ * Les 15 ecarts impairs sont BILINEAIRES en (o,e) : ils ne se separent pas
+ * comme les pairs, et jusqu'ici le drain les recalculait par 22 popcounts et
+ * par survivant -- 117 des 255 instructions.  Ils se separent quand meme, mais
+ * sur un axe different, et c'est __brev qui l'offre :
+ *
+ *   o vient de  rvF = __brev(u<<1) >> (32-N)  avec  u = blockIdx*256 + tid,
+ *   donc les bits FAIBLES de u -- exactement threadIdx -- atterrissent dans
+ *   les bits FORTS de o.  A l'interieur d'un bloc, o ne varie que sur les
+ *   HUIT bits [N-9, N-2] ; tout le reste de o est constant sur le bloc.
+ *
+ * Un ecart impair est une somme de produits O_a.E_c.  On classe les couples
+ * (a,c) selon que a tombe dans la fenetre du thread et c dans e_lo :
+ *
+ *   a hors fenetre, c hors e_lo -> (bloc, e_hi)   \ ensemble : A(o, e_lo=0),
+ *   a dans fenetre, c hors e_lo -> (thread, e_hi) /  un mot SWAR de sPw,
+ *                                                    calcule une fois par vhi
+ *   a hors fenetre, c dans e_lo -> (bloc, e_lo)   -> table sF, construite une
+ *                                                    fois PAR BLOC (elle ne
+ *                                                    depend pas de e_hi)
+ *   a dans fenetre, c dans e_lo -> trois termes seulement a n=31/K=7, traites
+ *                                  au vol par oe_fix
+ *
+ * Le drain lit donc  sF[e_lo] + sPw[thread]  en octets SWAR, exactement comme
+ * pour les ecarts pairs, et ne fait plus AUCUN popcount.  Les 30 popcounts qui
+ * etaient par survivant sont devenus par (thread, vhi), donc amortis sur les
+ * ~16,5 survivants du thread.  Le 16e octet porte le signe : sPw y met
+ * popc(o)+popc(e_hi), sF y met popc(e_lo), et la parite de la somme decide.
+ *
+ * Corps de la boucle interne : 288 -> 225 instructions SASS, dont 26 POPC -> 0.
+ * Decomposition verifiee exactement par check_decomp.c (0 divergence sur
+ * 3.10^6 ecarts a n=31, et pour n = 11..28).
+ *
+ * S'y ajoutent deux choses qui ne changent pas le resultat au bit pres :
+ *   - un chemin rapide dans l'arbre de produit quand les quatre facteurs de
+ *     64 bits tiennent sur un int32 (le terme typique vaut 2^64, le pire cas
+ *     2^169) : mul64_160s remplace deux mul64_96 plus mul96_160 ;
+ *   - des strides de 6 et 10 mots, multiples de 8 octets et de moitie impaire,
+ *     qui rendent les huit mots SWAR lisibles en quatre LDS.64 sans conflit.
+ *
+ * Mesure appariee contre la v6.1, GPU au repos, graine de tirage fixe :
+ * 657,3 / 663,1 h  ->  551,6 / 551,5 h a n=31, soit +19,7 %.  Les sommes
+ * partielles sont IDENTIQUES AU BIT PRES : les lignes PART= deja produites
+ * par la v6/v6.1 restent valides et s'agregent sans reserve.
  * ===================================================================== */
 #include <cstdio>
 #include <cstdlib>
@@ -189,6 +236,40 @@ __device__ __forceinline__ void mul96_160(const uint32_t*A,const uint32_t*C,uint
             : "r"(A[0]),"r"(A[1]),"r"(A[2]),"r"(C[0]),"r"(C[1]),"r"(C[2]));
 }
 
+/* 64x64 -> 128 bits SIGNE, etendu sur 160.  Les deux operandes tiennent sur un
+ * int64, donc le produit tient sur 126 bits : rien n'est tronque, l'extension
+ * de signe suffit.  Une seule chaine de retenue, un seul bloc asm.          */
+__device__ __forceinline__ void mul64_160s(long long A, long long C, uint32_t *z)
+{
+    const uint32_t a0=(uint32_t)(unsigned long long)A, a1=(uint32_t)((unsigned long long)A>>32);
+    const uint32_t c0=(uint32_t)(unsigned long long)C, c1=(uint32_t)((unsigned long long)C>>32);
+    asm("{\n\t"
+        ".reg .u32 t0, t1, ma, mc;\n\t"
+        "mul.lo.u32     %0, %5, %7;\n\t"
+        "mul.hi.u32     %1, %5, %7;\n\t"
+        "mad.lo.cc.u32  %1, %5, %8, %1;\n\t"
+        "madc.hi.u32    %2, %5, %8, 0;\n\t"
+        "mad.lo.cc.u32  %1, %6, %7, %1;\n\t"
+        "madc.hi.cc.u32 %2, %6, %7, %2;\n\t"
+        "addc.u32       %3, 0, 0;\n\t"
+        "mad.lo.cc.u32  %2, %6, %8, %2;\n\t"
+        "madc.hi.u32    %3, %6, %8, %3;\n\t"
+        /* a_s.c_s = a_u.c_u - 2^64 (s_a.c_u + s_c.a_u) */
+        "shr.s32        ma, %6, 31;\n\t"
+        "shr.s32        mc, %8, 31;\n\t"
+        "and.b32        t0, %7, ma;\n\t"
+        "and.b32        t1, %8, ma;\n\t"
+        "sub.cc.u32     %2, %2, t0;\n\t"
+        "subc.u32       %3, %3, t1;\n\t"
+        "and.b32        t0, %5, mc;\n\t"
+        "and.b32        t1, %6, mc;\n\t"
+        "sub.cc.u32     %2, %2, t0;\n\t"
+        "subc.u32       %3, %3, t1;\n\t"
+        "shr.s32        %4, %3, 31;\n\t"
+        "}" : "=&r"(z[0]),"=&r"(z[1]),"=&r"(z[2]),"=&r"(z[3]),"=&r"(z[4])
+            : "r"(a0),"r"(a1),"r"(c0),"r"(c1));
+}
+
 /* Produit 160 bits a entree mixte : 16 ecarts PAIRS en SWAR (4 mots) et les 8
  * produits deja formes des ecarts IMPAIRS.  Les impairs sortent des popcounts
  * en entiers ; les empaqueter en octets pour les re-extraire aussitot coute
@@ -214,6 +295,27 @@ __device__ __forceinline__ void prod160m(const uint32_t *ev, const int *p8,
     long long s[4];
     #pragma unroll
     for (int k=0;k<4;k++) s[k]=(long long)q4[2*k]*q4[2*k+1];
+
+    /* Chemin rapide.  Le pire cas exige 160 bits (un terme peut valoir 2^169),
+     * mais le terme TYPIQUE vaut ~2^64 : |A_i| ~ sqrt(2n-i), donc l'esperance
+     * de log2 du produit est 64,5 avec un ecart-type de 8,9.  Quand les quatre
+     * s[k] tiennent sur un int32 -- test exact, deux instructions chacun --
+     * A = s0.s1 et C = s2.s3 tiennent sur un int64 et |A.C| < 2^124 : une
+     * multiplication 64x64 remplace mul64_96 deux fois PLUS mul96_160.  Le
+     * chemin lent reste la pour le reste, donc le resultat est inchange au bit
+     * pres ; seul le nombre d'instructions bouge.                            */
+    {   uint32_t bad = 0;
+        #pragma unroll
+        for (int k=0;k<4;k++){
+            const unsigned long long u=(unsigned long long)s[k];
+            bad |= (uint32_t)(u>>32) ^ (uint32_t)((int32_t)(uint32_t)u>>31);
+        }
+        if (!bad) {
+            mul64_160s((long long)(int)s[0]*(int)s[1],
+                       (long long)(int)s[2]*(int)s[3], z);
+            return;
+        }
+    }
 
     /* Tout en complement a deux modulo 2^160 : l'accumulateur etant deja
      * modulaire et |somme finale| < 2^159, ni valeur absolue ni suivi de signe
@@ -241,47 +343,64 @@ __device__ __forceinline__ void prod160m(const uint32_t *ev, const int *p8,
                       z[3]=(uint32_t)t; z[4]-=A[1]+(uint32_t)((t>>63)&1ull); }
 }
 
+/* Correction (o_var x e_lo) et slot de signe.
+ *
+ * Deroule a la compilation.  A n=31/K=7 la boucle en c ne retient que TROIS
+ * termes (m=14 c=7, m=15 c=6, m=15 c=7) ; ailleurs elle rend v tel quel et ne
+ * coute rien.  Pour L > MO on rend 1 et le sextb correspondant est elimine.  */
+template<int N,int K,int L>
+__device__ __forceinline__ int oe_fix(int v, uint32_t o2, uint32_t e2)
+{
+    const int MO=N/2;
+    if (L >  MO) return 1;                 /* bourrage */
+    if (L == MO) return 1-2*(v&1);         /* signe : v = popc(o)+popc(e) */
+    const int m=L+1, A0=N-9, A1=N-2;       /* [A0,A1] : les bits de o portes par tid */
+    int t=0;
+    #pragma unroll
+    for (int c=1;c<=K;c++){
+        if (c>=m && c-m>=A0 && c-m<=A1)                  /* partenaire de la 1re somme */
+            t += (int)(((o2>>(c-m)) & (e2>>c)) & 1u);
+        if (c<=N-m-2 && c+m+1>=A0 && c+m+1<=A1)          /* partenaire de la 2e somme */
+            t += (int)(((o2>>(c+m+1)) & (e2>>c)) & 1u);
+    }
+    return t ? v+4*t : v;
+}
+
 /* autocorrelation de rangee, lag m, sur N cellules */
 template<int N> __device__ __forceinline__ int rowP(uint32_t r,int m){
     const int L=N-m; return L-2*__popc((r^(r>>m))&((1u<<L)-1u)); }
 
 
-/* un survivant : (tid', e_lo') -> les 31 ecarts, puis le produit 160 bits */
+/* lecture partagee 64 bits : deux mots SWAR contigus en une LDS.64 */
+__device__ __forceinline__ uint2 LF6_LD2(const uint32_t *p){
+    return *reinterpret_cast<const uint2*>(p); }
+
+/* un mot SWAR d'ecarts impairs : quatre octets signes, deux produits. */
+#define LF6_ODD(k) do {                                                        \
+    const uint32_t d_ = (od_[k]) ^ 0x80808080u;                                \
+    p8[2*(k)  ] = oe_fix<N,K,4*(k)+0>(sextb<SEXTB0>(d_),o2,e2)                 \
+                * oe_fix<N,K,4*(k)+1>(sextb<SEXTB1>(d_),o2,e2);                \
+    p8[2*(k)+1] = oe_fix<N,K,4*(k)+2>(sextb<SEXTB2>(d_),o2,e2)                 \
+                * oe_fix<N,K,4*(k)+3>(sextb<SEXTB3>(d_),o2,e2);                \
+  } while(0)
+
+/* un survivant : (tid', e_lo') -> les 31 ecarts, puis le produit 160 bits.
+ *
+ * v7 : les ecarts IMPAIRS sortent d'une SOMME DE DEUX TABLES exactement comme
+ * les pairs -- plus un seul popcount ici.                                    */
 #define LF6_ONE(ENT) do {                                                      \
     const uint32_t ent=(ENT); const int t2=(int)(ent>>16), el2=(int)(ent&0xFFFFu); \
-    const uint32_t o2 = sPw[t2][4];                                             \
     const uint32_t e2 = ((vhi<<K) | (uint32_t)el2) << 1;                        \
+    const uint32_t o2 = sPw[t2][4];                                             \
     uint32_t ev[4]; int p8[8];                                                 \
-    ev[0]=sT[el2][0]+sPw[t2][0]; ev[1]=sT[el2][1]+sPw[t2][1];                   \
-    ev[2]=sT[el2][2]+sPw[t2][2]; ev[3]=sT[el2][3]+sPw[t2][3];                   \
-    const int sgn = ((__popc(o2)+__popc(e2)) & 1) ? -1 : 1;                     \
-    _Pragma("unroll")                                                          \
-    for (int k=0;k<8;k++){                                                     \
-        int xv0, xv1;                                                          \
-        { const int m=2*k+1;                                                   \
-          if (m > MO) xv0 = (m==MO+1) ? sgn : 1;                            \
-          else if (m >= K+1) {   /* R(m) precalculee : independante de e_lo */  \
-            const int L2=N-m-1, q=m-(K+1);                                      \
-            const int Rc=(int)(short)(sPw[t2][5+(q>>1)]>>(16*(q&1)));            \
-            const int s2=(L2>0)?__popc((e2 ^ (o2>>(m+1))) & ((1u<<L2)-1u)):0;    \
-            xv0 = Rc + (L2>0?L2:0) - 2*s2; }                                \
-          else { const int L1=N-m, L2=N-m-1;                                     \
-            const int s1=__popc((o2 ^ (e2>>m)) & ((1u<<L1)-1u));                 \
-            const int s2=(L2>0)?__popc((e2 ^ (o2>>(m+1))) & ((1u<<L2)-1u)):0;    \
-            xv0 = L1 + (L2>0?L2:0) - 2*(s1+s2); } }                          \
-        { const int m=2*k+2;                                                   \
-          if (m > MO) xv1 = (m==MO+1) ? sgn : 1;                            \
-          else if (m >= K+1) {   /* R(m) precalculee : independante de e_lo */  \
-            const int L2=N-m-1, q=m-(K+1);                                      \
-            const int Rc=(int)(short)(sPw[t2][5+(q>>1)]>>(16*(q&1)));            \
-            const int s2=(L2>0)?__popc((e2 ^ (o2>>(m+1))) & ((1u<<L2)-1u)):0;    \
-            xv1 = Rc + (L2>0?L2:0) - 2*s2; }                                \
-          else { const int L1=N-m, L2=N-m-1;                                     \
-            const int s1=__popc((o2 ^ (e2>>m)) & ((1u<<L1)-1u));                 \
-            const int s2=(L2>0)?__popc((e2 ^ (o2>>(m+1))) & ((1u<<L2)-1u)):0;    \
-            xv1 = L1 + (L2>0?L2:0) - 2*(s1+s2); } }                          \
-        p8[k] = xv0*xv1;                                                       \
-    }                                                                          \
+    { const uint2 ta=LF6_LD2(&sT[el2][0]),  tb=LF6_LD2(&sT[el2][2]);            \
+      const uint2 pa=LF6_LD2(&sPw[t2][0]),  pb=LF6_LD2(&sPw[t2][2]);            \
+      ev[0]=ta.x+pa.x; ev[1]=ta.y+pa.y; ev[2]=tb.x+pb.x; ev[3]=tb.y+pb.y; }     \
+    uint32_t od_[4];                                                           \
+    { const uint2 fa=LF6_LD2(&sF[el2][0]),  fb=LF6_LD2(&sF[el2][2]);            \
+      const uint2 ga=LF6_LD2(&sPw[t2][6]),  gb=LF6_LD2(&sPw[t2][8]);            \
+      od_[0]=fa.x+ga.x; od_[1]=fa.y+ga.y; od_[2]=fb.x+gb.x; od_[3]=fb.y+gb.y; } \
+    LF6_ODD(0); LF6_ODD(1); LF6_ODD(2); LF6_ODD(3);                            \
     uint32_t z[5]; prod160m(ev,p8,z);                                          \
     ADD160(acc,z);                                                             \
   } while(0)
@@ -300,15 +419,19 @@ void oe_kernel(uint32_t vhi0, uint32_t vcnt, uint32_t blk0, uint32_t * __restric
     const int W  = NL/32;              /* mots par tranche       */
     const int WP = W+1;                /* +1 : anti-conflit banc */
     const int NS = ME*(N+1);           /* tranches de bitmap     */
-    /* Les R(m) constants (4.5) : un par ecart impair m = K+1..MO, empaquetes
-     * deux par mot.  Ce compte etait code en dur a 4 -- exact pour n=31 et
-     * K=7, et pour eux seuls : a K=6 il en faut 5, et l'ecriture du mot
-     * d'indice 9 debordait sur sQ, la file des survivants (acces illegal). */
-    const int NRC = (MO > K) ? ((MO-K)+1)/2 : 0;
+    /* Les 16 emplacements SWAR des ecarts IMPAIRS : MO ecarts (octets 0..MO-1),
+     * le slot de signe (octet MO), le reste en bourrage.  MO <= 15 pour tout
+     * n <= 31, donc quatre mots suffisent toujours. */
+    const int OW = 4;
 
-    __shared__ uint32_t sT[NL][5];   /* stride 5 : anti-conflit de bancs */     /* Q(e) empaquete SWAR, biais 64 */
+    /* Strides de 6 et 10 mots : multiples de 8 octets (donc LDS.64 legal) et
+     * moitie IMPAIRE (3 et 5), donc les paires de bancs restent distinctes sur
+     * seize voies -- aucun conflit.  Le drain lit huit mots SWAR en quatre
+     * LDS.64 au lieu de huit LDS.32.                                        */
+    __shared__ uint32_t sT[NL][6];     /* Q(e) empaquete SWAR, biais 64 */
+    __shared__ uint32_t sF[NL][6];     /* part e_lo des ecarts IMPAIRS, biais 64 */
     __shared__ uint32_t sB[NS*WP];     /* bitmaps par (lag, valeur)     */
-    __shared__ uint32_t sPw[256][5+NRC]; /* [0..3] P(o), [4] o, [5..] R(m) constants */
+    __shared__ uint32_t sPw[256][10];  /* [0..3] P(o), [4] o, [6..9] base impaire */
     __shared__ uint32_t sQ[8][64];     /* file des survivants, par warp */
 
     const int tid = threadIdx.x;
@@ -341,6 +464,41 @@ void oe_kernel(uint32_t vhi0, uint32_t vcnt, uint32_t blk0, uint32_t * __restric
     const uint32_t Fvhi = Fv >> K, Fvlo = Fv & ((1u<<K)-1u);
     const int wlo = (int)(Fvlo>>5), blo = (int)(Fvlo&31);
 
+    /* --- table sF : la part e_lo des ecarts impairs ------------------------
+     * A_{2m+1}(o,e) = Base_m(o,e_hi) + delta_m(o_fixe,e_lo) + 4.sum(o_a & e_c)
+     * Le terme delta ne lit que des bits de o COMMUNS a tout le bloc : le
+     * mapping u -> o passe par __brev, donc threadIdx ne pilote que les bits
+     * [N-9,N-2] de o et tout le reste est constant sur le bloc.  delta ne
+     * depend pas non plus de e_hi : la table se construit UNE FOIS par bloc,
+     * pas une fois par vhi.  Les rares termes ou le partenaire tombe dans
+     * [N-9,N-2] sont laisses au drain (trois a n=31, cf. oe_fix).            */
+    for (int el = tid; el < NL; el += 256) {
+        const uint32_t eb = (uint32_t)el << 1;      /* e_1..e_K aux bits 1..K */
+        uint32_t w[OW];
+        #pragma unroll
+        for (int k=0;k<OW;k++) w[k]=0x40404040u;
+        #pragma unroll
+        for (int m=1;m<=MO;m++){
+            int d=0;
+            #pragma unroll
+            for (int c=1;c<=K;c++){
+                const int ec=(int)((eb>>c)&1u);
+                if (c>=m){     const int a=c-m;
+                    if (a>=N-9 && a<=N-2) d -= 2*ec;   /* reporte au drain */
+                    else                  d -= 2*ec*(1-2*(int)((o>>a)&1u)); }
+                if (c<=N-m-2){ const int a=c+m+1;
+                    if (a>=N-9 && a<=N-2) d -= 2*ec;   /* reporte au drain */
+                    else                  d -= 2*ec*(1-2*(int)((o>>a)&1u)); }
+            }
+            const int l=m-1;
+            w[l>>2] = (w[l>>2] & ~(0xFFu<<(8*(l&3)))) | ((uint32_t)((d+64)&0xFF)<<(8*(l&3)));
+        }
+        {   const int l=MO, pv=64+__popc((uint32_t)el);   /* slot de signe */
+            w[l>>2] = (w[l>>2] & ~(0xFFu<<(8*(l&3)))) | ((uint32_t)(pv&0xFF)<<(8*(l&3))); }
+        #pragma unroll
+        for (int k=0;k<OW;k++) sF[el][k]=w[k];
+    }
+
     uint32_t acc[5] = {0,0,0,0,0};
     const int warp = tid>>5, lane = tid&31;
     const unsigned ltm = (1u<<lane)-1u;
@@ -348,20 +506,27 @@ void oe_kernel(uint32_t vhi0, uint32_t vcnt, uint32_t blk0, uint32_t * __restric
 
     for (uint32_t vv = 0; vv < vcnt; vv++) {
         const uint32_t vhi = vhi0 + vv;
-        /* R(m) = sum_j O_j E_{j+m} porte sur les indices E de m+1 a N ; e_lo
-         * occupe les cases 2..K+1, donc pour m >= K+1 cette correlation ne
-         * depend PAS de e_lo : elle est constante pour tout le bloc interne.
-         * On la calcule une fois par (thread, e_hi) et on economise 8 des 30
-         * popcounts du drain.                                              */
+        /* Base_m = A_{2m+1}(o, e_lo=0) : les 15 ecarts impairs evalues une
+         * fois par (thread, e_hi), empaquetes en octets SWAR biais 64.  Les
+         * 30 popcounts qui etaient PAR SURVIVANT sont maintenant PAR vhi,
+         * donc amortis sur les ~16,5 survivants du thread.  L'octet MO porte
+         * popc(o)+popc(e_hi), la moitie thread du signe.                    */
         {   const uint32_t e0 = (vhi<<K)<<1;
+            uint32_t w[OW];
             #pragma unroll
-            for (int m=K+1; m<=MO; m++){
-                const int L1=N-m;
-                const int R = L1 - 2*__popc((o ^ (e0>>m)) & ((1u<<L1)-1u));
-                const int q = m-(K+1);
-                if (q&1) sPw[tid][5+(q>>1)] |= ((uint32_t)(R & 0xFFFF))<<16;
-                else     sPw[tid][5+(q>>1)]  =  ((uint32_t)(R & 0xFFFF));
+            for (int k=0;k<OW;k++) w[k]=0x40404040u;
+            #pragma unroll
+            for (int m=1;m<=MO;m++){
+                const int L1=N-m, L2=N-m-1;
+                int A = L1 - 2*__popc((o ^ (e0>>m)) & ((1u<<L1)-1u));
+                if (L2>0) A += L2 - 2*__popc((e0 ^ (o>>(m+1))) & ((1u<<L2)-1u));
+                const int l=m-1;
+                w[l>>2] = (w[l>>2] & ~(0xFFu<<(8*(l&3)))) | ((uint32_t)((A+64)&0xFF)<<(8*(l&3)));
             }
+            {   const int l=MO, pv=64+__popc(o)+__popc(e0);
+                w[l>>2] = (w[l>>2] & ~(0xFFu<<(8*(l&3)))) | ((uint32_t)(pv&0xFF)<<(8*(l&3))); }
+            #pragma unroll
+            for (int k=0;k<OW;k++) sPw[tid][6+k]=w[k];
         }
         __syncthreads();
         /* --- phase 1 : table Q (biais 64) --- */

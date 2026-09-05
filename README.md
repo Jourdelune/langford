@@ -6,7 +6,7 @@ nombres. Exhiber une solution est trivial ; les compter toutes est un problème
 ouvert au-delà de n=28.
 
 Ce dépôt contient une implémentation CUDA de la méthode algébrique de Godfrey,
-poussée jusqu'à **5,84× plus vite** que mon point de départ — et **~39× plus
+poussée jusqu'à **6,99× plus vite** que mon point de départ — et **~47× plus
 vite que l'état de l'art publié, sur le même matériel** — avec au passage la
 fermeture — par preuve ou par mesure — de **quatre** pistes qui étaient
 jusque-là seulement « non abouties », dont les tensor cores (§5.2).
@@ -16,11 +16,13 @@ jusque-là seulement « non abouties », dont les tensor cores (§5.2).
 | état de l'art publié (2015), sur la même 4070 | ≈ 1,4 h | ≈ 3,6 j | ≈ 14,4 j | **≈ 1 100 j** |
 | point de départ (v3) | 15,9 min | 16,9 h | 2,82 j | 180,1 j |
 | v6 | 3,0 min | 3,18 h | 12,7 h | ≈ 34,0 j |
-| **v6.1 (ce dépôt)** | **2,8 min** | **≈ 2,95 h**† | **≈ 11,7 h**† | **≈ 30,9 j** |
+| v6.1 | 2,8 min | ≈ 2,95 h | ≈ 11,7 h | ≈ 30,9 j |
+| **v7 (ce dépôt)** | **2,8 min** | **≈ 2,61 h** | **≈ 10,6 h** | **≈ 25,8 j** |
 
-† n=27 et n=28 ne sont pas remesurés : le gain de la v6.1 est mesuré à n=24
-(+6,10 %) et à n=31 (+10,13 %), et interpolé linéairement entre les deux. Voir
-§4.9.
+Le gain de la v7 est mesuré **séparément à chaque n** — +1,5 % à n=24, +13,2 %
+à n=27, +10,2 % à n=28, **+19,7 % à n=31** — et non interpolé : il dépend
+fortement de *n*, et pour une raison qu'on sait nommer (§4.10). Il se trouve
+qu'il est le plus grand là où c'est utile, au cas ouvert.
 
 Lignes 2 à 4 : mesurées. Ligne 1 : modélisée — la version publiée n'est pas
 réimplémentée ici, son coût est reconstitué à partir de ses deux écarts avec ma
@@ -259,7 +261,8 @@ Tous les débits sont mesurés GPU au repos, moyennés sur des shards répartis
 | v4 — saut des termes nuls | 65,6 | 101,7 j | ×1,77 |
 | v5 — demi-état + déroulage | 89,0 | 75,0 j | ×2,40 |
 | v6 — parité + bitmaps de survie | 392,7\* | 34,0 j | ×5,30 |
-| **v6.1 — chaînes de retenue + PRMT** | **432,5\*** | **30,9 j** | **×5,84** |
+| v6.1 — chaînes de retenue + PRMT | 432,5\* | 30,9 j | ×5,84 |
+| **v7 — écarts impairs tabulés** | **517,7\*** | **25,8 j** | **×6,99** |
 
 \* la v6 énumère 2^{2n−2} points nominaux dont la moitié n'est jamais lancée ;
 le débit est rapporté à ce total nominal.
@@ -305,7 +308,7 @@ Une fois la boucle chaude supprimée, tout est dans le drain. Décomposition
 mesurée sur la v6 : produit 64 %, écarts impairs 55 %, base 30 % — les parts se
 recouvrent, parce qu'elles viennent de suppressions qui masquaient aussi de la
 latence. **Le profil de la v6.1, refait avec un protocole qui ne se recouvre
-pas, est au §4.10** ; il déplace le problème (la « base » est dans la compaction
+pas, est au §4.11** ; il déplace le problème (la « base » est dans la compaction
 et le balayage, pas dans les tables).
 
 * Les 15 écarts impairs sortent des popcounts en **entiers**, et on les
@@ -333,6 +336,10 @@ mais moins la construction des tables s'amortit. K=7 reste l'optimum.
 
 Drain final : **287 instructions SASS par point survivant** — ramené à **251**
 par la v6.1 (§4.9).
+
+*La v7 (§4.10) généralise cette section aux **trente** popcounts, et pas
+seulement à huit : ce n'est pas `e_lo` qu'il faut regarder, mais le fait que
+`threadIdx` ne pilote que huit bits de `o`.*
 
 ### 4.6 Essayé, mesuré, sans gain
 
@@ -368,6 +375,18 @@ par la v6.1 (§4.9).
   est validée, on ne la touche pas pour rien.
 * **Vectoriser le balayage** (`LDS.128`) et **supprimer les lectures partagées
   du drain** : 5 % et 4,5 % plus lent respectivement. Détail et raison au §4.10.
+* **Constantes d'écart pré-additionnées.** Les huit R(m) du §4.5 étaient
+  rangées en int16 et le drain leur ajoutait `L2`, une constante de
+  compilation, par un IADD3 par écart. En rangeant plutôt `R(m) + L2`, qui tient
+  sur un **octet** signé (dans [−1, 45] à n=31), on retire les 8 IADD3 et deux
+  LDS, et l'extraction reste à une instruction (`prmt` au lieu de
+  `LEA.HI.SX32`). Compté au désassemblage : **1 520 → 1 504 instructions**.
+  Mesuré : **3,5 % plus lent**, reproductible sur deux tours (678,9 contre
+  656,1 h). Seize instructions de moins et une perte nette — le §4.8 conclut
+  que « seul le compte d'instructions compte », et c'est le contre-exemple : le
+  compte ne suffit pas quand il déplace la pression sur un port (ici 10 `prmt`
+  de plus) ou change le stride d'un tableau partagé. Non retenu ; la v7 rend le
+  point sans objet, puisqu'elle supprime ces constantes.
 * **Rebalayage de K après la v6.1.** Le drain ayant maigri de 12,5 %, l'optimum
   aurait pu se déplacer. Non : K=8 mesure 796 h (registres 64 → 71, et 34,8 Ko
   de mémoire partagée qui font tomber l'occupancy), K=6 mesure ~1 570 h. **K=7
@@ -439,7 +458,7 @@ rien donné.)
 **Hypothèse 3 — mémoire partagée.** LSU à ~15 % d'utilisation. Rejeté.
 
 (Le profil complet, refait sur la v6.1 avec deux protocoles indépendants, est
-au §4.10.)
+au §4.11.)
 
 **Conclusion.** Le noyau est à ~80 % du plafond d'émission que lui impose son
 propre mélange d'instructions (une instruction ALU occupe son pipe deux cycles,
@@ -578,7 +597,160 @@ K=7 — et pour eux seuls : à K=6 il en faut dix, et le dixième mot débordait
 la file des survivants du bloc, d'où un accès illégal. Le compte est maintenant
 dérivé de (N, K). C'est neutre à K=7, à l'octet et à l'instruction près.
 
-### 4.10  Où va le temps, maintenant (profil mesuré, pas estimé)
+### 4.10  v7 — les écarts impairs deviennent, eux aussi, une somme de deux tables (×1,197)
+
+Le §4.5 avait remarqué qu'*une* des deux corrélations de l'écart impair *m* ne
+dépend pas de `e_lo` dès que m ≥ K+1, et en avait tiré 8 des 30 popcounts du
+drain. Le §4.8 avait ensuite conclu qu'il n'y avait plus rien à prendre de ce
+côté : sa sonde « POPC → `& 31` » montre que le POPC n'a aucune pénalité de
+débit cachée sur Ada, donc **échanger un popcount contre une lecture en mémoire
+partagée est perdant d'avance**.
+
+Cette conclusion est juste, et elle ne ferme pas ce qui suit — parce que la v7
+n'échange pas les popcounts contre des lectures. Elle les **sort du drain** vers
+un endroit où ils sont amortis sur ~16,5 survivants.
+
+**Ce que `__brev` donnait gratuitement depuis la v6.** Le noyau construit `o`
+par `rvF = __brev(u<<1) >> (32−N)` avec `u = blockIdx·256 + threadIdx`. Les bits
+de poids **faible** de `u` — donc exactement `threadIdx` — atterrissent dans les
+bits de poids **fort** de `rvF`. D'où un fait que je n'avais jamais exploité :
+
+> à l'intérieur d'un bloc, `o` ne varie que sur les **huit** bits [N−9, N−2].
+> Tout le reste de `o` est constant sur le bloc.
+
+(Le bit N−1 vaut 0 avant canonicalisation ; le drapeau de canonicalisation
+`rvF & 1` est le bit N−2 de `u`, donc un bit de bloc lui aussi.)
+
+**La décomposition.** Un écart impair est une somme de produits O_a·E_c. On
+classe les couples (a, c) selon que *a* tombe dans la fenêtre du thread et *c*
+dans `e_lo` :
+
+| a ∈ fenêtre thread | c ∈ `e_lo` | dépend de | rangé où |
+|---|---|---|---|
+| non | non | (bloc, e_hi) | mot SWAR de `sPw` |
+| **oui** | non | (thread, e_hi) | mot SWAR de `sPw` |
+| non | **oui** | (bloc, `e_lo`) | **table `sF`** |
+| **oui** | **oui** | les deux | **3 termes** à n=31/K=7 |
+
+Les deux premières lignes se calculent ensemble, et sans effort : leur somme est
+simplement A_{2m+1}(o, `e_lo` = 0). La troisième ne dépend pas de `e_hi`, donc
+`sF` se construit **une fois par bloc**, pas une fois par `vhi`. La quatrième se
+réduit à trois produits de bits, traités au vol.
+
+Les 15 écarts impairs sortent donc, comme les 16 pairs, d'une simple **addition
+SWAR de deux mots lus en mémoire partagée** :
+
+    ecart impair = sF[e_lo] + sPw[thread]     (octets, biais 64 de chaque cote)
+
+Le 16ᵉ octet porte le signe : `sPw` y met popc(o)+popc(e_hi), `sF` y met
+popc(`e_lo`), et la parité de leur somme décide. Le drain ne fait **plus aucun
+popcount**.
+
+`check_decomp.c` vérifie l'identité exactement, terme à terme, report des termes
+croisés compris : **0 divergence** sur 3,0·10⁶ écarts tirés à n=31, et le même
+contrôle passe pour n = 11 à 28. Il imprime aussi les termes croisés : à n=31 et
+K=7 il y en a **trois**, sur les écarts m=14 et m=15.
+
+**Deux ajouts qui ne touchent pas non plus au résultat.**
+
+* **Chemin rapide dans l'arbre de produit.** Le pire cas exige 160 bits — un
+  terme peut valoir 2¹⁶⁹ — mais le terme *typique* vaut 2⁶⁴ : |A_i| ~ √(2n−i),
+  donc E[log₂ ∏|A_i|] = 64,5 avec un écart-type de 8,9. Quand les quatre
+  facteurs 64 bits de l'étage médian tiennent sur un `int32` — test exact, deux
+  instructions chacun — le produit tient sur 126 bits et **une seule**
+  multiplication 64×64 remplace deux `mul64_96` *plus* `mul96_160`. Le chemin
+  lent reste là pour le reste, donc le résultat est inchangé au bit près.
+* **Strides de 6 et 10 mots** pour `sT`, `sF` et `sPw` : multiples de 8 octets
+  (donc `LDS.64` légal) et de moitié **impaire** (3 et 5), donc les paires de
+  bancs restent distinctes sur seize voies. Les huit mots SWAR du drain se
+  lisent en quatre `LDS.64` : 18 LDS → 10.
+
+**Mesuré.**
+
+| | v6.1 | **v7** |
+|---|---|---|
+| corps de la boucle interne (SASS) | 288 | **225** puis 262† |
+| dont POPC | 26 | **0** |
+| registres / spill | 64 / 0 | 80 / 0 |
+| blocs par SM | 3 | 3 |
+| n=31, `--bench 64` | 657,3 / 663,1 h | **551,6 / 551,5 h** |
+
+† la décomposition seule tombe à 225 ; le chemin rapide *ajoute* du code
+statique — les deux branches sont dans la boucle — tout en retirant des
+instructions *exécutées*. Rappel utile que le compte statique ne décide de rien
+ici : le §4.6 contient d'ailleurs une réécriture qui retire 16 instructions du
+noyau et mesure **3,5 % plus lent**.
+
+Les trois étages, mesurés séparément et appariés sur le même échantillon de
+`vhi` :
+
+| | h GPU | gain cumulé |
+|---|---|---|
+| v6.1 | 657,3 / 663,1 | — |
+| + tables d'écarts impairs | 600,2 / 600,6 | +9,9 % |
+| + chemin rapide du produit | 562,5 / 562,5 | +17,4 % |
+| **+ lectures `LDS.64`** | **551,6 / 551,5** | **+19,7 %** |
+
+La v7 est aussi bien plus **stable** d'un tirage à l'autre : 551,56 puis
+551,46 h sur deux tours (0,02 %), là où la v6.1 donne 657,3 puis 663,1 (0,9 %).
+Cohérent avec la disparition des popcounts, dont le coût dépendait du motif de
+bits.
+
+**Le gain dépend beaucoup de *n*, et on sait pourquoi.** Il vaut +19,7 % à
+n=31 mais **+1,5 %** à n=24. La cause est la dernière ligne du tableau de
+décomposition : le nombre de termes croisés, ceux que la table ne peut pas
+porter et que le drain doit refaire à la main. Ce nombre est piloté par
+l'écart entre la fenêtre du thread — les bits [N−9, N−2] — et `e_lo`, les bits
+1..K. Plus *n* est grand, plus les deux fenêtres s'éloignent, et moins il reste
+de couples (a, c) où les deux tombent dedans. `check_decomp.c` les compte :
+
+| n | 20 | 23 | 24 | 27 | 28 | **31** |
+|---|---|---|---|---|---|---|
+| termes croisés restants | 35 | 21 | 21 | 10 | 10 | **3** |
+| gain mesuré | — | — | +1,5 % | +13,2 % | +10,2 % | **+19,7 %** |
+
+À n=24 les deux fenêtres se touchent presque et vingt et un produits de bits
+reviennent dans le drain ; à n=31 il n'en reste que trois. **L'optimisation est
+donc la plus efficace exactement là où elle sert** — au cas ouvert. C'est aussi
+pourquoi je ne l'interpole pas : les mesures de n=27 et n=28 (`--bench 32`,
+donc plus bruitées que celles de n=31) sortent d'ailleurs dans le mauvais ordre
+l'une par rapport à l'autre, ce qui donne l'échelle du bruit sur ces deux
+points-là.
+
+**Une question fermée au passage.** Les 80 registres de la v7 tiennent tout
+juste 3 blocs par SM. J'ai donc mesuré la variante à 2 blocs (`-DLF6_MINBLK=2`,
+110 registres, ptxas cesse de rematérialiser les invariants de boucle) :
+**702,8 h**, soit 27 % plus lent. Le §4.8 concluait l'occupancy indifférente
+*entre 16 et 40 warps* ; sur ce noyau-ci, à 16 warps, elle ne l'est plus. Trois
+blocs par SM est le bon point, et c'est lui qui fixe le budget de registres.
+
+**Ce que ça ne change pas.** Les huit valeurs connues (n = 11, 12, 15, 16, 19,
+20, 23, 24) sont reproduites à l'unité près. Le noyau diagonal sort la même
+somme au bit près à n=31. Et le contrôle qui porte vraiment, celui du §4.9 :
+**cinq tranches réelles de n=31** — `vhi` = 0 (le shard dégénéré du §4.7), 1 000,
+4 698 750, 8 000 000, et la queue où la réflexion élague tout — recalculées par
+les deux binaires donnent des sommes partielles **identiques au bit près**. Les
+lignes `PART=` déjà produites par la v6/v6.1 restent donc valides et s'agrègent
+sans réserve.
+
+Ce que ça ne couvre toujours pas : un run complet de `oe_kernel` à n=27 ou 28.
+Le trou du §3.3 reste ouvert, ni plus ni moins qu'avant.
+
+**Ce qui n'a pas été refait, et devrait l'être.** Trois choses, dont deux
+pourraient encore rapporter :
+
+* **Le balayage de K.** K=7 était l'optimum de la v6.1, et l'arbitrage a changé
+  du tout au tout : les 30 popcounts par (thread, vhi) coûtent maintenant plus
+  cher relativement, et K=8 les amortirait sur deux fois plus de `e_lo`. Mais
+  K=8 double `sB` et ferait tomber l'occupancy à 2 blocs par SM — précisément
+  ce que la mesure ci-dessus condamne. À vérifier plutôt qu'à supposer.
+* **Le profil du §4.11**, refait sur la v6.1, ne décrit plus le drain de la v7 :
+  la compaction et le balayage y pèsent forcément plus lourd maintenant que le
+  drain a fondu.
+* **Le rapport 5090/4070 (§7.2, §7.3)**, mesuré sur la v6.1. Le mélange
+  d'instructions a changé ; le rapport aussi, peut-être.
+
+### 4.11  Où va le temps (profil mesuré sur la v6.1)
 
 Le §4.4 datait de la v6 et donnait des parts qui se recouvraient (« produit
 64 %, écarts impairs 55 %, base 30 % »), parce qu'elles venaient de suppressions
@@ -1086,16 +1258,16 @@ dernier point du record publié :
 | | matériel | temps | GPU-jours |
 |---|---|---|---|
 | Assarpour, Bar-Noy & Liu (2015) | ~32 GPU Kepler | ~9 jours | ~288 |
-| **ce dépôt (v6.1)** | 1 × RTX 4070 | **≈ 11,7 h** | **0,49** |
+| **ce dépôt (v7)** | 1 × RTX 4070 | **≈ 10,6 h** | **0,44** |
 
-soit **~590× moins de GPU-jours**. Une part revient au matériel : un GPU Kepler
+soit **~650× moins de GPU-jours**. Une part revient au matériel : un GPU Kepler
 de 2013 délivre ~1,3·10¹² opérations entières/s contre 7,3·10¹² pour une 4070
 (≈ 1,5·10¹³ en comptant le pipe FMA), soit un facteur **6 à 11**. Le reste —
 **environ 50 à 90×** — vient de l'algorithme et de l'implémentation : symétrie
 d'ordre 8 complète, saut des 87 % de produits nuls, décomposition de parité,
 bitmaps de survie, et une arithmétique 160 bits tronquée plutôt que du CRT
 modulaire. Chiffré directement à matériel identique (ci-dessous), cet écart
-purement algorithmique vaut **~38×** ; les 50 à 90× le dépassent parce qu'ils
+purement algorithmique vaut **~45×** ; les 50 à 90× le dépassent parce qu'ils
 absorbent aussi le rendement de leur distribution sur ~32 cartes.
 
 ### Le point de départ vrai : l'état de l'art publié, sur la même carte
@@ -1131,11 +1303,12 @@ symétrie manquante double le nombre de points :
 | même énumération, arithmétique de ce dépôt (v1/v2) | 2⁶⁰ | 160 bits tronqué | 360 j |
 | v3 — point de départ du §4 | 2⁵⁹ | 160 bits tronqué | 180,1 j |
 | v6 | 2⁵⁹ nominal | + bitmaps de survie | 32,2 j (mesuré) |
-| **v6.1 — ce dépôt** | 2⁵⁹ nominal | + arbre en chaînes de retenue | **29,2 j (mesuré)** |
+| v6.1 | 2⁵⁹ nominal | + arbre en chaînes de retenue | 29,2 j (mesuré) |
+| **v7 — ce dépôt** | 2⁵⁹ nominal | + écarts impairs tabulés | **24,4 j (mesuré)** |
 
-> **≈ 1 100 jours contre 29,2 mesurés : ~38× à matériel identique.**
+> **≈ 1 100 jours contre 24,4 mesurés : ~45× à matériel identique.**
 > Fourchette 740 à 1 380 jours selon la qualité de l'implémentation modulaire,
-> soit **23× à 43×**. Le 5,30× du §4 n'en est que la partie v3 → v6.
+> soit **30× à 57×**. Le 5,30× du §4 n'en est que la partie v3 → v6.
 
 Deux précautions. D'abord ce chiffrage est **favorable au point de comparaison** :
 il lui prête mon code de Gray, mon empaquetage SWAR et mon arbre de produit, et
@@ -1150,12 +1323,12 @@ l'écart restant étant le rendement de leur distribution sur ~32 cartes.
 changé, c'est son prix — colonne « avant » = ma v3 ; l'état de l'art publié, lui,
 demanderait ≈ 1 100 jours sur la même carte :
 
-| | avant (v3) | maintenant (v6.1) |
+| | avant (v3) | maintenant (v7) |
 |---|---|---|
-| sur une 4070 | 180 jours | **30,9 jours** |
-| sur une RTX 4090 | ~67 jours | **~11,4 jours** |
-| en location grand public (~0,35 $/h) | ~560 $ | **~96 $** |
-| en parallèle | ~26 GPU pendant une semaine | **~4,5 GPU pendant une semaine** |
+| sur une 4070 | 180 jours | **25,8 jours** |
+| sur une RTX 4090 | ~67 jours | **~9,5 jours** |
+| en location grand public (~0,35 $/h) | ~560 $ | **~80 $** |
+| en parallèle | ~26 GPU pendant une semaine | **~3,7 GPU pendant une semaine** |
 
 Le record passe d'une allocation de calcul intensif à un budget individuel.
 C'est un changement de **classe d'accessibilité**, pas de classe de complexité.
@@ -1172,25 +1345,33 @@ de refaire ces chemins.
 | | n=31 |
 |---|---|
 | v6, mesurée | 34,0 j |
-| **v6.1, mesurée** | **30,9 j** |
+| v6.1, mesurée | 30,9 j |
+| **v7, mesurée** | **25,8 j** |
 | même code à 100 % d'émission (inatteignable) | 17,1 j |
 
-37,4 instructions par point canonique (0,129 × 251 de drain, plus ~5 de base),
-216,3 Gsums/s canoniques → 8,09·10¹² instructions/s contre un plafond d'émission
-de 1,46·10¹³ : **55 % du plafond de la carte**. Le gain de la v6.1 est donc
-**entièrement** du compte d'instructions — le taux d'émission, lui, baisse
-légèrement (57 % → 55 %), ce qui est cohérent avec un noyau qui exécute la même
-chose avec moins d'instructions et non mieux ordonnancées.
+À la v6.1 : 37,4 instructions par point canonique (0,129 × 251 de drain, plus
+~5 de base), 216,3 Gsums/s canoniques → 8,09·10¹² instructions/s contre un
+plafond d'émission de 1,46·10¹³, soit **55 % du plafond de la carte**.
 
-Les 22 popcounts des écarts impairs sont exactement au minimum (2 SHF, 2 LOP3,
-2 POPC, 2 arithmétiques par écart non précalculé) et l'arbre de produit l'est
-aussi désormais (§4.9). Le plancher de ~250 instructions par survivant estimé
-pour la v6 est **atteint** (251) — ce qui veut surtout dire que cette
-estimation-là est à refaire avant de servir de repère.
+**La v7 casse deux affirmations de ce paragraphe, et il faut le dire.**
 
-Ce qui reste n'est ni l'occupancy, ni les pipes, ni la mémoire — les trois ont
-été testés et éliminés (§4.8). Le noyau est à ~80 % du plafond que lui impose son
-propre mélange ALU/FMA ; seul le nombre d'instructions compte encore.
+1. *« Les 22 popcounts des écarts impairs sont exactement au minimum. »* Vrai
+   pour le calcul tel qu'il était posé, faux pour le problème : la v7 n'en
+   exécute **aucun** dans le drain (§4.10). Le minimum d'une formulation n'est
+   pas le minimum du calcul — c'est la leçon la plus utile de cette passe.
+2. *« Seul le nombre d'instructions compte encore. »* Deux mesures le
+   contredisent maintenant, dans les deux sens : une réécriture qui retire
+   16 instructions du noyau et coûte **3,5 %** (§4.6, constantes
+   pré-additionnées), et le chemin rapide du produit qui en **ajoute** au
+   compte statique tout en gagnant 7,4 % (§4.10). Le modèle du §4.8 reste une
+   bonne première approximation ; il ne prédit plus le signe du gain à lui
+   seul.
+
+Ce qui survit, en revanche : ni l'occupancy, ni les pipes, ni la mémoire ne
+sont le facteur limitant — et l'occupancy a été retestée sur la v7, avec cette
+fois une réponse **nette** dans l'autre sens (2 blocs par SM : 27 % plus lent,
+§4.10). Le noyau reste limité par ce que son propre mélange d'instructions lui
+impose à l'émission.
 
 ---
 
@@ -1298,32 +1479,37 @@ PROJECTION n=31 : 777.7 h GPU = 32.40 jours   (IC95% 653.6 .. 901.8 h)
 Contrôle : un échantillon hors-ligne de 144 tirages donne 772 h (IC95 %
 696–850). Les deux méthodes concordent à 0,8 %.
 
-> **RTX 4070 : n=31 en 29,2 jours (701 h GPU), IC95 % [632, 772].**
-> Le chiffre de 30,9 j annoncé plus haut vient du débit nominal en Gsums/s ;
+> **RTX 4070 : n=31 en 24,4 jours (586 h GPU), IC95 % [528, 645].**
+> Le chiffre de 25,8 j annoncé plus haut vient du débit nominal en Gsums/s ;
 > la mesure directe est un peu meilleure. C'est celle qui fait foi.
 >
-> (v6 : 32,2 j / 772 h. La v6.1 est mesurée **appariée** contre la v6, à
-> +10,13 % ± 0,07 sur quatre tours et deux échantillons — §4.9 ; c'est ce
-> rapport qui est fiable, et il est appliqué ici au 772 h de référence. Les
-> valeurs absolues, elles, portent ±8 % : le même binaire v6 mesure 720 h ou
-> 772 h selon l'échantillon et l'état d'horloge de la carte.)
+> (v6 : 32,2 j / 772 h ; v6.1 : 29,2 j / 701 h. La v7 est mesurée **appariée**
+> contre la v6.1, à +19,7 % sur quatre tours et deux échantillons — +21,00 /
+> +19,64 / +19,55 / +19,53 %, §4.10 ; c'est ce rapport qui est fiable, et il
+> est appliqué ici au 701 h de référence. Les valeurs absolues, elles, portent
+> ±8 % : le même binaire v6 mesure 720 h ou 772 h selon l'échantillon et l'état
+> d'horloge de la carte. La v7, elle, est reproductible à 0,02 % d'un tour à
+> l'autre — la disparition des popcounts a rendu le coût bien moins dépendant
+> du motif de bits.)
 
 La graine du tirage est **fixe**. Deux GPU différents mesurent donc le même
 échantillon de `vhi` : la comparaison est appariée, et le rapport entre deux
 cartes est bien plus précis que chacune des deux estimations absolues.
 
-| n | v3 | v4 | v5 | v6 | **v6.1** |
-|---|---|---|---|---|---|
-| 24 | 15,9 min | 9,0 min | 6,6 min | 3,0 min | **2,8 min** (gain mesuré) |
-| 27 | 16,9 h | 9,5 h | 7,0 h | 3,18 h | **≈ 2,95 h** |
-| 28 | 2,82 j | 1,59 j | 1,17 j | 12,7 h | **≈ 11,7 h** |
-| **31** | 180,1 j | 101,7 j | 75,0 j | 32,2 j | **29,2 j** (gain mesuré) |
-| 32 | 1,97 an | 1,11 an | 0,82 an | ≈ 129 j | **≈ 117 j** |
+| n | v3 | v4 | v5 | v6 | v6.1 | **v7** |
+|---|---|---|---|---|---|---|
+| 24 | 15,9 min | 9,0 min | 6,6 min | 3,0 min | 2,8 min | **2,8 min** (+1,5 %) |
+| 27 | 16,9 h | 9,5 h | 7,0 h | 3,18 h | ≈ 2,95 h | **≈ 2,61 h** (+13,2 %) |
+| 28 | 2,82 j | 1,59 j | 1,17 j | 12,7 h | ≈ 11,7 h | **≈ 10,6 h** (+10,2 %) |
+| **31** | 180,1 j | 101,7 j | 75,0 j | 32,2 j | 29,2 j | **24,4 j** (+19,7 %) |
+| 32 | 1,97 an | 1,11 an | 0,82 an | ≈ 129 j | ≈ 117 j | **≈ 96 j** |
 
-Colonne v6.1 : n=24 et n=31 mesurés, les autres obtenus en interpolant le gain
-entre ces deux points (§4.9).
+Colonne v7 : le gain est mesuré **à chaque n** — n=24 bout en bout (186,8 s
+contre 184,1 s), n=27, 28 et 31 par `--bench` apparié — et non interpolé, parce
+qu'il varie beaucoup avec *n* (§4.10). La ligne n=32 reste, elle, une
+extrapolation du rapport de n=31.
 
-Tout l'état de l'art publié (L(27) + L(28)) se refait en **~14,7 heures** sur
+Tout l'état de l'art publié (L(27) + L(28)) se refait en **~13,2 heures** sur
 cette carte.
 
 ### 7.2  Quelle architecture — le modèle, puis la mesure qui le contredit
@@ -1380,29 +1566,34 @@ payer un silicium qu'il n'utilisera pas.
 
 ### 7.3  Coût réel sur vast.ai (relevé septembre 2026)
 
-`h GPU` = 772 / rapport. Le coût total ne dépend **que** des heures-GPU : la
+`h GPU` = 586 / rapport. Le coût total ne dépend **que** des heures-GPU : la
 parallélisation n'achète que du temps de calendrier, jamais des euros. Seule la
 ligne 5090 repose sur une mesure ; les autres rapports restent modélisés, et le
 cas Blackwell montre que le modèle peut se tromper de 30 %.
 
 | GPU | rapport | h GPU | $/h spot | **coût spot** | $/h à la demande | coût |
 |---|---|---|---|---|---|---|
-| RTX 4070 (référence) | 1,00 | 772 | — | — | — | — |
-| RTX 3090 | 1,22 *(modèle)* | 632 | 0,12 | 76 $ | 0,20 | 126 $ |
-| RTX 4090 | 2,83 *(modèle)* | 272 | 0,11 | **30 $** | 0,25 | 68 $ |
-| **RTX 5090** | **3,05 *(mesuré)*** | **253** | 0,20 | **51 $** | 0,336 | 85 $ |
-| H100 SXM | 2,03 *(modèle)* | 379 | — | — | 1,65 | 625 $ |
+| RTX 4070 (référence) | 1,00 | 586 | — | — | — | — |
+| RTX 3090 | 1,22 *(modèle)* | 480 | 0,12 | 58 $ | 0,20 | 96 $ |
+| RTX 4090 | 2,83 *(modèle)* | 207 | 0,11 | **23 $** | 0,25 | 52 $ |
+| **RTX 5090** | **3,05 *(mesuré)*** | **192** | 0,20 | **38 $** | 0,336 | 65 $ |
+| H100 SXM | 2,03 *(modèle)* | 289 | — | — | 1,65 | 477 $ |
 
 La 5090 reste le meilleur choix mesuré, mais l'écart avec la 4090 se resserre
 nettement une fois le modèle corrigé : 3,05 contre 2,83, pour un prix spot
 presque double. **Si le rapport 2,83 de la 4090 se confirmait par la mesure,
 elle serait le choix le moins cher** — cela vaut le benchmark à 0,14 $.
 
-Temps de calendrier avec plusieurs 5090 — le coût reste ~51 $ en spot :
+Temps de calendrier avec plusieurs 5090 — le coût reste ~38 $ en spot :
 
 | 5090 en parallèle | 1 | 5 | 10 | **25** | 50 |
 |---|---|---|---|---|---|
-| calendrier | 10,5 j | 2,1 j | 25 h | **10 h** | 5 h |
+| calendrier | 8,0 j | 1,6 j | 19 h | **7,7 h** | 3,8 h |
+
+*Le rapport 5090/4070 de 3,05 a été mesuré sur la v6.1 ; il est repris tel quel
+ici. La v7 déplace le mélange d'instructions (plus de `prmt` et de `LDS.64`,
+plus aucun `popc` dans le drain), donc ce rapport mériterait d'être remesuré
+avant une grosse location — c'est le même benchmark à 0,03 $ qu'au §7.4.*
 
 ### 7.4  Plan recommandé
 
@@ -1641,10 +1832,14 @@ Les briques de plus bas niveau, si besoin :
 
 **Noyaux de calcul**
 
-* `langford6.cu` — **version de référence** : coordonnées de parité, bitmaps de
-  survie, réflexion reparamétrée, produit en complément à deux, arbre 160 bits
-  en chaînes de retenue PTX et extraction SWAR par `prmt` (§4.9).
-  `-DK_=<k>` recompile avec un autre découpage `e_lo` ; K=7 est l'optimum mesuré
+* `langford6.cu` — **version de référence (v7)** : coordonnées de parité,
+  bitmaps de survie, réflexion reparamétrée, produit en complément à deux,
+  arbre 160 bits en chaînes de retenue PTX et extraction SWAR par `prmt`
+  (§4.9), écarts impairs tabulés en somme de deux mots SWAR (§4.10).
+  `-DK_=<k>` recompile avec un autre découpage `e_lo` ; K=7 est l'optimum
+  mesuré sur la v6.1, **non rebalayé depuis la v7** — voir §4.10
+* `check_decomp.c` (§9, vérification) est le contrôle qui valide la
+  décomposition sur laquelle repose ce noyau
 * `langford5.cu` — demi-état + déroulage par 8
 * `langford4.cu` — saut des termes nuls par compaction warp
 * `langford3.cu` — Godfrey + groupe de symétries complet
@@ -1669,6 +1864,9 @@ Les briques de plus bas niveau, si besoin :
 * `tensorcheck.cu` — débit mesuré des tensor cores INT8 contre le motif
   `xor`+masque+`popc` du drain : c'est ce banc qui ferme la piste GEMM (§5.2)
 * `oe_check.c` — décomposition de parité, vérifiée jusqu'à n=31
+* `check_decomp.c` — décomposition v7 des écarts **impairs** en
+  `Base(o,e_hi) + delta(bloc,e_lo) + termes croisés`, vérifiée terme à terme et
+  qui énumère les termes croisés restants (§4.10)
 * `oe_ref.c` / `oe_ref2.c` — références CPU : coordonnées de parité, puis réflexion
 * `pfaff_test.c` / `pfaff_zk.c` — réfutation de Kasteleyn (±1 puis U(1))
 * `dpstates.cpp` — comptage exact des états atteignables de la DP

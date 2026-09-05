@@ -16,6 +16,7 @@ dpstates
 fiber
 zfrac
 oe_check
+check_decomp
 oe_ref
 oe_ref2
 single
@@ -47,4 +48,5 @@ vast_*.json
 parts_merge.txt
 orch.log
 langford6.fat
+langford6.prev
 tensorcheck
