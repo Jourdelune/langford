@@ -17,7 +17,11 @@ jusque-là seulement « non abouties », dont les tensor cores (§5.2).
 | point de départ (v3) | 15,9 min | 16,9 h | 2,82 j | 180,1 j |
 | v6 | 3,0 min | 3,18 h | 12,7 h | ≈ 34,0 j |
 | v6.1 | 2,8 min | ≈ 2,95 h | ≈ 11,7 h | ≈ 30,9 j |
-| **v7 (ce dépôt)** | **2,8 min** | **≈ 2,61 h** | **≈ 10,6 h** | **≈ 25,8 j** |
+| **v7 (ce dépôt)** | **2,8 min** | **2,48 h** ‡ | **≈ 10,6 h** | **≈ 25,8 j** |
+
+‡ n=27 n'est plus une projection : le **total complet a été calculé**, en
+2 h 28 min, et rend `L(2,27) = 111 683 611 098 764 903 232` — exactement la
+valeur publiée par Assarpour, Bar-Noy & Liu (2015). Voir §3.2(d).
 
 Le gain de la v7 est mesuré **séparément à chaque n** — +1,5 % à n=24, +13,2 %
 à n=27, +10,2 % à n=28, **+19,7 % à n=31** — et non interpolé : il dépend
@@ -115,7 +119,8 @@ le prédicat devient **v ≤ u** : les blocs sans travail ne sont jamais lancés
 > tous les n de 1 à 16, la couverture de l'énumération est prouvée en Lean *et*
 > vérifiée exhaustivement sur les 1,07·10⁹ index de n=31, et neuf tranches de
 > n=31 — dont les deux régimes extrêmes et le milieu exact — sont identiques au
-> bit près à un recalcul par l'**algorithme classique**. Le risque qu'il reste
+> bit près à un recalcul par l'**algorithme classique**. Le total complet de
+> **n=27 retombe sur la valeur publiée**. Le risque qu'il reste
 > une erreur *systématique* est bien en dessous de 1 %. Le risque dominant n'est
 > pas là : c'est le **matériel sans ECC** sur 205 heures-GPU, et la seule parade
 > complète est de **dupliquer le run** (~23 $ de plus, §3.3bis).
@@ -236,7 +241,19 @@ classique). `verify_all.sh` l'inclut, donc une faute de transcription dans le
 README ferait échouer la chaîne.
 
 **(d) Les valeurs connues, de bout en bout.** n = 11, 12, 15, 16, 19, 20, 23, 24
-reproduites à l'unité près par le binaire courant.
+reproduites à l'unité près par le binaire courant — et surtout :
+
+> **n = 27 : total complet calculé, 2 h 28 min sur la 4070.**
+> `V(27) = 223 367 222 197 529 806 464`, donc
+> **`L(2,27) = 111 683 611 098 764 903 232`** — exactement la valeur publiée par
+> Assarpour, Bar-Noy & Liu (2015), obtenue par eux sur une grappe de GPU.
+
+C'est le contrôle le plus fort dont on dispose, et il manquait : jusqu'ici aucun
+**total** n'avait jamais été calculé au-delà de n=24 avec ce noyau. Il exerce ce
+qu'aucune tranche isolée n'exerce — les 524 288 lancements, l'agrégation hôte,
+les deux auto-tests de divisibilité sur un vrai total — à un n dont les largeurs
+de masque et les comptes d'écarts (14 pairs, 13 impairs) sont proches de ceux de
+n=31.
 
 S'y ajoutent les contrôles déjà en place : recoupement v3/v4/v5 identique au bit
 près sur n=31 ; `oe_ref`/`oe_ref2` (références CPU en coordonnées de parité) ;
@@ -247,11 +264,11 @@ sur la machine qui l'a produite. Sur les tranches n=31 rendues : v₂ ≥ 24, so
 
 ### 3.3 Ce que la validation ne couvre toujours pas
 
-**Un run complet à n=27 ou n=28.** Les *tranches* de n=27, 28 et 31 sont
-maintenant vérifiées au bit près contre la définition (§3.2c), ce qui exerce
-les largeurs de masque et les comptes d'écarts propres à ces n. Mais aucun
-**total** n'a été calculé à n=27/28, et c'est le seul endroit où une erreur
-d'agrégation se verrait. Coût : ~2,6 h + ~10,6 h.
+**Un run complet à n=28.** Celui de n=27 est fait (§3.2d) et retombe sur la
+valeur publiée, ce qui ferme la question de l'agrégation à grand n. Reste n=28,
+le second point du record publié : ~10,6 h, soit le trou le moins cher qui
+subsiste. Rien n'indique qu'il révélerait quoi que ce soit — n=27 et n=28
+partagent le même nombre d'écarts pairs — mais il est bon marché.
 
 **Une erreur d'un seul bit dans les bits hauts d'une tranche.** Les auto-tests
 ne contraignent que les bits bas (16 par tranche, 63 sur le total) ; un bit
@@ -343,12 +360,12 @@ de découpage et d'agrégation.
 
 | | | | |
 |---|---|---|---|
-| 10 | les valeurs connues sont reproduites | **M** | n = 11..24, binaire courant |
+| 10 | les valeurs connues sont reproduites | **M** | n = 11..24 **et n=27**, binaire courant |
 | 11 | une référence CPU concorde | **M** | `./oe_ref 12`, `./oe_ref2 12` |
 | 12 | recoupement entre versions indépendantes | **M** | v3/v4/v5 identiques au bit près sur n=31 |
 | 13 | **les chemins de code propres à n=27, 28, 31** | **M** | `./slice_ref` contre le noyau, au bit près : 9 tranches à n=31 dont le **shard dégénéré `vhi=0`** (87,9 % de survivants, 1,37·10¹¹ points) et le **milieu exact** de la plage, plus n=27 et n=28 (§3.2c). *C'était le trou n° 13 ; il est fermé au niveau de la tranche, pas du total.* |
 | 14 | une tranche est déterministe (rejeu bit à bit) | **M** | `audit.sh` §5 |
-| 15 | **un total complet à n=27 ou 28** | **✗** | ~2,6 h + ~10,6 h — le trou le moins cher qui reste |
+| 15 | un total complet au-delà de n=24 | **M** | **n=27 calculé en entier : `L(2,27) = 111 683 611 098 764 903 232`, la valeur publiée, à l'unité près** (§3.2d). n=28 reste à faire, ~10,6 h |
 
 **Le run de plusieurs semaines n'a pas dérivé**
 
@@ -1750,18 +1767,22 @@ cartes est bien plus précis que chacune des deux estimations absolues.
 | n | v3 | v4 | v5 | v6 | v6.1 | **v7** |
 |---|---|---|---|---|---|---|
 | 24 | 15,9 min | 9,0 min | 6,6 min | 3,0 min | 2,8 min | **2,8 min** (+1,5 %) |
-| 27 | 16,9 h | 9,5 h | 7,0 h | 3,18 h | ≈ 2,95 h | **≈ 2,61 h** (+13,2 %) |
+| 27 | 16,9 h | 9,5 h | 7,0 h | 3,18 h | ≈ 2,95 h | **2,48 h** (total calculé) |
 | 28 | 2,82 j | 1,59 j | 1,17 j | 12,7 h | ≈ 11,7 h | **≈ 10,6 h** (+10,2 %) |
 | **31** | 180,1 j | 101,7 j | 75,0 j | 32,2 j | 29,2 j | **24,4 j** (+19,7 %) |
 | 32 | 1,97 an | 1,11 an | 0,82 an | ≈ 129 j | ≈ 117 j | **≈ 96 j** |
 
 Colonne v7 : le gain est mesuré **à chaque n** — n=24 bout en bout (186,8 s
-contre 184,1 s), n=27, 28 et 31 par `--bench` apparié — et non interpolé, parce
-qu'il varie beaucoup avec *n* (§4.10). La ligne n=32 reste, elle, une
-extrapolation du rapport de n=31.
+contre 184,1 s), n=28 et 31 par `--bench` apparié — et non interpolé, parce
+qu'il varie beaucoup avec *n* (§4.10). **n=27 n'est pas une projection du tout :
+le total complet a tourné, en 8 915 s (2 h 28), à 505,1 Gsums/s** — 5 % plus
+vite que les 2,61 h projetés, et cela *malgré* une machine qui faisait tourner
+`slice_ref` sur 18 cœurs pendant une partie du run. La ligne n=32 reste, elle,
+une extrapolation du rapport de n=31.
 
-Tout l'état de l'art publié (L(27) + L(28)) se refait en **~13,2 heures** sur
-cette carte.
+Tout l'état de l'art publié (L(27) + L(28)) se refait en **~13,1 heures** sur
+cette carte — dont la moitié est désormais faite : L(27) a été recalculé ici en
+2 h 28 et concorde à l'unité près (§3.2d).
 
 ### 7.2  Quelle architecture — le modèle, puis la mesure qui le contredit
 
