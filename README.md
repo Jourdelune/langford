@@ -117,10 +117,11 @@ le prédicat devient **v ≤ u** : les blocs sans travail ne sont jamais lancés
    ±1 ne retient que les monômes à exposants tous impairs ; somme des exposants
    = 2n avec 2n exposants impairs ⟹ tous valent 1. Le coefficient multilinéaire
    compte les systèmes ordonnés de cordes couvrant chaque position une fois,
-   soit 2·L(2,n).
+   soit 2·L(2,n). *Vérifiée en plus par calcul exhaustif contre une force brute
+   indépendante pour n = 1 à 16 — `./verify 16`, §3.2.*
 2. **La décomposition de parité** (§2.2) : calcul d'indices, plus vérification
    numérique exhaustive par échantillonnage jusqu'à n=31.
-3. **A_i ≡ i (mod 2)**, donc seuls les 16 écarts pairs peuvent s'annuler : c'est
+3. **A_i ≡ i (mod 2)**, donc seuls les écarts pairs peuvent s'annuler : c'est
    la correction du test de survie de la v4/v5/v6.
 4. **Le groupe de symétries est d'ordre exactement 8.** Un motif de signes ε avec
    A_i(εx) = ±A_i(x) impose ε_k·ε_{k+i} constant en k pour tout i, donc
@@ -131,124 +132,195 @@ le prédicat devient **v ≤ u** : les blocs sans travail ne sont jamais lancés
    stabilisateur connu est d'ordre 4 — **98 % des fibres font exactement 4**
    (n=11 : 1 018 688 fibres de taille 4 contre 14 018 de taille 8), les rares
    plus grandes étant des coïncidences isolées sans structure de groupe.
-5. **La troncature à 160 bits est exacte.** La somme vraie vaut 2^{2n}·V(n)
+5. **La réduction ×4 n'est valide que pour n ≡ 0 ou 3 (mod 4).** Nier la rangée
+   `o` multiplie ∏A_i par (−1)^{MO} et le poids ∏x_k par (−1)^N : la sommande
+   n'est invariante que si MO + N est pair — c'est-à-dire exactement aux n où
+   une suite de Langford existe. **Ce point manquait, et il coûtait cher** : le
+   noyau acceptait `-n 9` et répondait `L(2,9) = 5558`, là où la réponse est 0.
+   Un nombre faux, plausible, qu'aucun auto-test n'attrapait. Le binaire refuse
+   maintenant ces n ; `./verify 16` montre la divergence à chacun d'eux.
+6. **La troncature à 160 bits est exacte.** La somme vraie vaut 2^{2n}·V(n)
    ≈ 2^{145,3} < 2¹⁶⁰ : l'arithmétique modulo 2¹⁶⁰ *est* la réponse exacte, avec
    15 bits de marge.
-6. **La réflexion en coordonnées de parité** : `oe_ref2.c` énumère la moitié
-   canonique `e ≤ f(o)` (poids 2) plus les orbites fixes `e = f(o)` (poids 1) et
-   reproduit exactement n = 7, 8, 11, 12.
+7. **La couverture de l'énumération, en Lean.** `proof/Langford.lean` prouve —
+   sans mathlib, sans `sorry`, `#print axioms` ne rendant que `propext` et
+   `Quot.sound` — que tout point a **exactement un** représentant énuméré :
+   unicité du translaté épinglé de Klein (`klein_exact`), distinction des quatre
+   translatés (`klein_orbit_card_four`, donc le facteur est 4 et pas moins),
+   involutivité de σ, trichotomie de la réflexion (`reflexion_exact` : énuméré /
+   diagonal / miroir énuméré, les trois s'excluant), et `couverture_exacte`.
+   Le théorème vaut pour **un ordre total strict quelconque**, donc il ne dépend
+   pas du codage des rangées.
 
 ### 3.2 Validation empirique
 
-**Toutes les valeurs connues sont reproduites exactement par la v6** :
+Quatre vérifications indépendantes, de la plus éloignée du code à la plus
+proche. Elles se relancent toutes d'un coup par `./verify_all.sh`.
 
-| n | L(2,n) | v6 |
-|---|---|---|
-| 11, 12 | 17 792 ; 108 144 | ✓ |
-| 15, 16 | 39 809 640 ; 326 721 800 | ✓ |
-| 19, 20 | 256 814 891 280 ; 2 636 337 861 200 | ✓ |
-| 23 | 3 799 455 942 515 488 | ✓ |
-| 24 | 46 845 158 056 515 936 | ✓ |
+**(a) L'identité de Godfrey, contre une force brute.** `verify.c` compte trois
+fois le même nombre par trois chemins qui ne partagent rien : un retour sur
+trace qui énumère les suites (la définition), la somme de Godfrey sur les
+2^{2n} points **sans aucune symétrie**, et la même somme réduite par Klein ×4.
 
-(n = 7, 8 sont hors du domaine de découpage de la v6 ; v3/v4/v5 les reproduisent.)
+| n | 1 – 16, tous |
+|---|---|
+| force brute = Godfrey complet | **exact partout**, y compris les n où L = 0 |
+| Klein ×4 = Godfrey complet | **exact ssi n ≡ 0,3 (mod 4)** — et faux ailleurs |
 
-Quatre contrôles indépendants s'ajoutent :
+C'est ce tableau qui a révélé le point 5 du §3.1.
 
-* **Recoupement croisé entre versions.** v3, v4 et v5 produisent des sommes
-  partielles **identiques au bit près** sur n=31, pour deux géométries de shard
-  indépendantes (t=12 shards 0..59 ; t=10 shards 3000..3024).
-* **Recoupement par changement complet d'énumération.** La v6 n'a en commun avec
-  les précédentes ni les coordonnées, ni l'ordre de parcours, ni la mise en
-  œuvre de la symétrie, ni la structure de boucle. Qu'elle retrouve exactement
-  les mêmes valeurs jusqu'à n=24 est une vérification indépendante forte.
-* **Auto-test intégré, gratuit — sur le total.** Le total doit être divisible
-  par **2^{2n+1}** (= 2⁶³ pour n=31) : 2n bits parce que le total vaut
-  2^{2n}·V(n), plus un parce que V(n) = 2·L(2,n) est pair — aucun appariement
-  de Langford n'est son propre miroir, il faudrait 2p = 2n−k pour tout k, ce
-  qui est impossible dès que k est impair. Une corruption *aléatoire* échoue à
-  ce test avec probabilité 1 − 2^{−(2n+1)}. **Attention à ne pas surinterpréter** :
-  le test ne regarde que les bits bas, donc une erreur d'**un seul bit au-delà
-  de la position 2n+1** le passe intégralement (§3.3).
-* **Auto-test par tranche, gratuit aussi.** Chaque terme est un produit des n
-  facteurs A_i et A_i ≡ i (mod 2), donc les ⌊(n+1)/2⌋ **écarts pairs** donnent
-  chacun un facteur 2 : toute somme partielle est divisible par 2^{⌊(n+1)/2⌋}
-  (2¹⁶ à n=31). Contrairement au précédent, ce test vaut pour une tranche
-  **isolée** : une tranche corrompue est rejetée sur la machine qui l'a
-  produite, pas trois semaines plus tard. Mesure sur les tranches n=31 déjà
-  rendues : v₂ ≥ 24, soit 8 bits de marge sur les 16 garantis.
-* **Référence CPU indépendante.** `oe_ref` recalcule V(n) dans les coordonnées
-  de parité, sans GPU, et concorde.
+**(b) La couverture, au niveau des bits.** `cover_check.c` réalise le théorème
+Lean sur l'indexation *réelle* du noyau — `__brev`, `canon`, le prédicat
+`v < u` — et la vérifie **exhaustivement** : involutivité de `rev` et de `f`,
+`o(u) = f(u<<1)`, `f(o(u)) = u<<1`, bijection des 2^{N−1} index vers les rangées
+épinglées, et le compte 4·(2·C(T,2)+T) = 4^N. **À n=31 cela porte sur les
+1 073 741 824 index, un par un.** Plus, pour n ≤ 12, la couverture point par
+point de chaque orbite. C'est le pont entre la preuve abstraite et le code.
 
-### 3.3 Ce que la validation ne couvre pas
+**(c) Des tranches recalculées depuis la définition.** `slice_ref.c` reprend une
+tranche `PART=` et la recalcule sans rien partager avec le noyau : pas de
+décomposition de parité, pas de SWAR, pas de PTX, pas de chemin rapide — il
+reconstruit la suite X entière et applique A_i = Σ_k x_k x_{k+i}. **28 tranches
+comparées, toutes identiques au bit près**, dont cinq **à n=31** avec des
+valeurs pleines :
 
-**Un bug propre à n=31.** Les chemins de code dépendants de n (largeurs de
-masques, nombre d'écarts, tailles de table) sont exercés à n=24 mais pas aux
-valeurs exactes de n=31. v6 n'a **jamais** tourné à n=27 ni n=28 — `val27.txt`
-n'est qu'un en-tête, et au format v3. Ces deux valeurs sont publiées et coûtent
-~2,9 h + ~11,7 h : c'est le trou le moins cher à fermer, et il ne l'est pas.
+    n=31 vhi=8388607  ->  e4d775be:143d6853:f88bf9c3:5f90e9e5:c8000000
+    n=28 vhi=1048575  ->  fffeb84b:1fe955eb:74462f13:059828b1:77400000
+    n=27 vhi=524287   ->  fffffd17:c7e8428b:b3dbf5d2:eff1920f:ba400000
 
-**Une erreur d'un seul bit dans les bits hauts d'une tranche.** Les deux
-auto-tests ne contraignent que les bits bas : celui par tranche les 16 premiers,
-celui du total les 63 premiers. Un bit flippé au-delà passe les deux et donne
-une réponse fausse d'allure parfaitement plausible. Vérifié en injectant la
-faute : sur les tranches réelles de n=20, un bit inversé en position 128 est
-accepté sans broncher. Sur les 160 positions d'une tranche, **63 sont couvertes
-par les auto-tests** et une vingtaine tout en haut par l'écart à l'estimateur de
-Knuth (± 2 %) ; **les ~75 du milieu ne le sont par rien**. Seuls un rejeu (l'audit
-du §3.4) ou une somme de contrôle transportée avec la ligne `PART` les
-attrapent — la seconde n'existe pas encore.
+C'est ce contrôle-là qui ferme la décomposition de parité, l'arithmétique
+160 bits et le chemin rapide **en une fois**, et qui atteint enfin n=27, 28 et
+31 — que le §3.3 signalait comme jamais exercés.
 
-**Et, évidemment, un bug qui donnerait la même réponse fausse dans deux versions
+**(d) Les valeurs connues, de bout en bout.** n = 11, 12, 15, 16, 19, 20, 23, 24
+reproduites à l'unité près par le binaire courant.
+
+S'y ajoutent les contrôles déjà en place : recoupement v3/v4/v5 identique au bit
+près sur n=31 ; `oe_ref`/`oe_ref2` (références CPU en coordonnées de parité) ;
+et les deux auto-tests gratuits — divisibilité du total par 2^{2n+1} et de
+**chaque tranche** par 2^{⌊(n+1)/2⌋}, ce dernier rejetant une tranche corrompue
+sur la machine qui l'a produite. Sur les tranches n=31 rendues : v₂ ≥ 24, soit
+8 bits de marge sur les 16 garantis.
+
+### 3.3 Ce que la validation ne couvre toujours pas
+
+**Un run complet à n=27 ou n=28.** Les *tranches* de n=27, 28 et 31 sont
+maintenant vérifiées au bit près contre la définition (§3.2c), ce qui exerce
+les largeurs de masque et les comptes d'écarts propres à ces n. Mais aucun
+**total** n'a été calculé à n=27/28, et c'est le seul endroit où une erreur
+d'agrégation se verrait. Coût : ~2,6 h + ~10,6 h.
+
+**Le milieu de la plage de `vhi` à n=31.** `slice_ref` est en O(points de la
+tranche) : les tranches de queue sont vérifiables en secondes, celles du milieu
+demanderaient des jours. Les cinq tranches n=31 vérifiées sont donc toutes dans
+le dernier millième de la plage. Le code exécuté y est le même, mais les
+données sont moins variées.
+
+**Une erreur d'un seul bit dans les bits hauts d'une tranche.** Les auto-tests
+ne contraignent que les bits bas (16 par tranche, 63 sur le total) ; un bit
+inversé au-delà passe les deux. `audit.sh` le couvre maintenant **par sondage** :
+il rejoue un échantillon aléatoire de tâches et compare au bit près. Un sondage
+n'est pas une preuve — rejouer 2 % des tâches attrape une corruption isolée avec
+probabilité 2 %.
+
+**Un bug qui donnerait la même réponse fausse dans deux implémentations
 indépendantes.** Rien ne l'exclut ; c'est la limite ordinaire de ce genre de
-calcul.
+calcul. C'est aussi pourquoi il n'existe **aucun moyen connu de vérifier ce
+résultat plus vite que de le recalculer** : pas de certificat succinct, c'est le
+corollaire direct du 4ⁿ du §5.
 
 ### 3.4 Checklist
 
-Ce qu'il faudrait cocher pour que le résultat d'un run n=31 soit défendable, et
-où on en est. **P** = démontré, **M** = vérifié par calcul (commande donnée),
+**P** = démontré, **L** = prouvé en Lean, **M** = vérifié par calcul,
 **✗** = non couvert.
 
 **La méthode donne bien le nombre d'appariements**
 
 | | ce qui doit être vrai | | comment |
 |---|---|---|---|
-| 1 | l'identité de Godfrey extrait 2·L(2,n) | **P** | homogénéité de degré 2n en 2n variables, §3.1(1) |
-| 2 | la troncature à 2¹⁶⁰ est exacte | **P** | somme = 2^{145,3}, 15 bits de marge, §3.1(5) |
-| 3 | A_i ≡ i (mod 2) : seuls les écarts pairs annulent | **P** | §3.1(3) |
-| 4 | le groupe de symétries est d'ordre exactement 8 | **P M** | preuve §3.1(4) + `./fiber 12` |
-| 5 | décomposition de parité | **P M** | calcul d'indices + `./oe_check 31` → 6 200 000 écarts, 0 divergence |
-| 6 | réflexion : demi-énumération poids 2 + orbites fixes poids 1 | **P M** | `./refl_test 7 8 11 12` → 0 échec d'involution, 0 écart de sommande, demi-énumération exacte |
-| 7 | V(n) = 2·L(2,n) est **pair** | **P** | aucun appariement n'est son propre miroir : 2p = 2n−k impossible pour k impair |
-| 8 | toute somme partielle est divisible par 2^{⌊(n+1)/2⌋} | **P M** | ⌊(n+1)/2⌋ écarts pairs ; vérifié sur toutes les tranches n=31 rendues à ce jour (v₂ ≥ 24 mesuré, 16 garantis) |
+| 1 | l'identité de Godfrey extrait 2·L(2,n) | **P M** | homogénéité §3.1(1) + `./verify 16` : force brute = Godfrey complet, n = 1..16 |
+| 2 | la réduction ×4 de Klein est licite | **P M** | MO+N pair ⟺ n ≡ 0,3 (mod 4), §3.1(5) ; `./verify 16` le montre à chaque n ; le binaire refuse les autres |
+| 3 | la troncature à 2¹⁶⁰ est exacte | **P** | somme = 2^{145,3}, 15 bits de marge |
+| 4 | A_i ≡ i (mod 2) | **P** | §3.1(3) |
+| 5 | groupe de symétries d'ordre exactement 8 | **P M** | §3.1(4) + `./fiber 12` |
+| 6 | décomposition de parité | **P M** | `./oe_check 31` → 6 200 000 écarts, 0 divergence ; et implicitement par `slice_ref` |
+| 7 | l'énumération couvre chaque point **exactement une fois** | **L M** | `proof/Langford.lean` (`couverture_exacte`) + `./cover_check 9 31` exhaustif, **1,07·10⁹ index vérifiés à n=31** |
+| 8 | V(n) = 2·L(2,n) est pair | **P** | aucun appariement n'est son propre miroir |
+| 9 | toute tranche est divisible par 2^{⌊(n+1)/2⌋} | **P M** | mesuré v₂ ≥ 24 à n=31 |
 
 **Le code calcule bien cette somme**
 
 | | | | |
 |---|---|---|---|
-| 9 | v6 reproduit les valeurs connues | **M** | n = 11, 12, 15, 16, 19, 20 **et 23** rejoués avec le binaire courant, valeurs exactes ; n=23 est le plus grand cas ≡ 3 (mod 4) atteignable en quelques minutes, donc le plus proche parent de n=31 |
-| 10 | une référence CPU sans GPU concorde | **M** | `./oe_ref 12` et `./oe_ref2 12` → 108 144, idem n = 7, 8, 11 |
-| 11 | recoupement entre versions indépendantes | **M** | v3/v4/v5 identiques au bit près sur n=31, deux géométries de shard (§3.2) |
-| 12 | une tranche est déterministe (rejeu bit à bit) | **M** | tâche 6607 du run n=31 rejouée → `PART` identique |
-| 13 | **les chemins de code propres à n=31** | **✗** | v6 n'a jamais tourné à n=27/28. ~2,9 h + ~11,7 h. |
+| 10 | les valeurs connues sont reproduites | **M** | n = 11..24, binaire courant |
+| 11 | une référence CPU concorde | **M** | `./oe_ref 12`, `./oe_ref2 12` |
+| 12 | recoupement entre versions indépendantes | **M** | v3/v4/v5 identiques au bit près sur n=31 |
+| 13 | **les chemins de code propres à n=27, 28, 31** | **M** | `./slice_ref` contre le noyau : 28 tranches identiques au bit près, dont 5 à n=31, 1 à n=28, 2 à n=27 (§3.2c). *C'était le trou n° 13 de la version précédente ; il est fermé au niveau de la tranche, pas du total.* |
+| 14 | une tranche est déterministe (rejeu bit à bit) | **M** | `audit.sh` §5 |
+| 15 | **un total complet à n=27 ou 28** | **✗** | ~2,6 h + ~10,6 h — le trou le moins cher qui reste |
 
 **Le run de plusieurs semaines n'a pas dérivé**
 
 | | | | |
 |---|---|---|---|
-| 14 | tranche manquante ou dupliquée | **M** | `collect.sh` (complétude + doublons) puis divisibilité par 2^{2n+1} |
-| 15 | corruption dans les 16 bits bas d'une tranche | **M** | auto-test par tranche, sur la machine productrice |
-| 16 | corruption dans les bits 16 à 62 | **M** | auto-test du total |
-| 17 | **corruption dans les bits ≥ 63 d'une tranche** | **✗** | angle mort mesuré (§3.3). Mitigation : rejouer 1–2 % des tâches sur une autre carte et comparer bit à bit (~5 h, ~2 $) ; une somme de contrôle sur la ligne `PART` le fermerait complètement |
-| 18 | erreur structurelle (symétrie, terme diagonal) | **M** | `./estimate 31` → 5,74·10²⁴ ± 2 % ; toute erreur de ce type décale d'un facteur ≥ 2 |
-| 19 | **recalcul complet indépendant** | **✗** | v5 sur n=31 : 75 j sur la 4070, ~25 j sur une 5090 (~120 $). C'est la seule chose qui mérite le nom de preuve. |
+| 16 | tranche manquante ou dupliquée | **M** | `audit.sh` §1 |
+| 17 | corruption dans les bits bas d'une tranche | **M** | auto-test par tranche, sur la machine productrice |
+| 18 | corruption dans les bits 16 à 62 | **M** | auto-test du total, `audit.sh` §2 |
+| 19 | corruption dans les bits ≥ 63 d'une tranche | **M (sondage)** | `audit.sh` §5 rejoue un échantillon ; probabilité de détection = fraction rejouée |
+| 20 | toutes les tâches ont tourné le **même** code | **M** | `audit.sh` §3 : inventaire des empreintes sha256 portées par chaque ligne |
+| 21 | erreur structurelle (symétrie, terme diagonal) | **M** | `./estimate 31` → 5,74·10²⁴ ± 2 % ; toute erreur de ce type décale d'un facteur ≥ 2 |
+| 22 | **recalcul complet indépendant** | **✗** | la seule chose qui mérite le nom de preuve ; ~205 h GPU sur une 4090 |
 
-Deux remarques pour finir. **Il n'existe aucun moyen connu de vérifier ce
-résultat plus vite que de le recalculer** — pas de certificat succinct, c'est le
-corollaire direct du 4ⁿ du §5. Et **publier les 8 193 sommes partielles** ne
-coûte rien : n'importe qui peut alors refaire l'addition, refaire les
-auto-tests, et recalculer les tranches de son choix sans refaire le run.
+### 3.5 Refaire la vérification soi-même
 
----
+Toute la chaîne, en une commande :
+
+```sh
+./verify_all.sh            # ~3 min
+./verify_all.sh full       # ~25 min : ajoute n=16, n=23/24 et plus de tranches
+```
+
+Elle enchaîne les sept étapes : identité de Godfrey contre force brute,
+couverture exhaustive au niveau des bits jusqu'à n=31, décomposition de parité,
+tranches recalculées depuis la définition, valeurs connues de bout en bout,
+refus des n illicites, et la preuve Lean. Elle sort non nul si quoi que ce soit
+diverge — **à lancer avant toute campagne**.
+
+Contrôles individuels :
+
+```sh
+./verify 16                     # Godfrey vs force brute, n = 1..16
+./cover_check 9 31 12           # couverture exacte, exhaustive, jusqu'a n=31
+./slice_ref 31 8388607          # une tranche recalculee depuis la definition
+./langford6 -n 31 --from 8388607 --count 1 --chunk 1   # la meme, par le GPU
+./check_slices.sh 31:8388607 28:1048575 27:524287      # comparaison au bit pres
+(cd proof && lean Langford.lean)                       # la preuve
+```
+
+### 3.6 Faire relire le résultat par quelqu'un d'autre
+
+Chaque tâche distribuée écrit désormais sa **provenance** à la suite de sa somme
+partielle : empreinte sha256 du binaire, carte, pilote, plage de `vhi`, durée,
+horodatage UTC. Les deux premiers champs ne bougent pas, donc `collect.sh`
+continue de fonctionner tel quel.
+
+```
+#417 00000000:0000102f:f39eee83:d063b35b:56800000 task:417/4096 n:31 \
+     vhi:1904..1912 sha:0cfba5123669308d gpu:NVIDIA_GeForce_RTX_4090 \
+     drv:570.86.10 sec:181 utc:2026-09-05T09:12:44Z
+```
+
+`./audit.sh 31 4096` produit alors un dossier d'audit en cinq points :
+complétude et unicité des tâches, auto-test arithmétique sur le total,
+**inventaire des binaires** (toutes les tâches doivent porter la même empreinte),
+inventaire des cartes et pilotes, et **recalcul redondant d'un échantillon
+aléatoire** comparé au bit près. `SAMPLE=50 ./audit.sh 31 4096` rejoue 50 tâches.
+
+Ce qu'il faut publier pour qu'un tiers puisse conclure sans refaire le calcul :
+le fichier `parts_n31.txt` complet (8 193 lignes avec provenance), la sortie de
+`verify_all.sh`, celle d'`audit.sh`, et l'empreinte du binaire avec le commit
+correspondant. N'importe qui peut alors refaire l'addition, rejouer les
+auto-tests, et recalculer les tranches de son choix.
 
 ## 4. Les optimisations, dans l'ordre, avec les gains mesurés
 
@@ -1894,6 +1966,18 @@ Les briques de plus bas niveau, si besoin :
 
 * `tensorcheck.cu` — débit mesuré des tensor cores INT8 contre le motif
   `xor`+masque+`popc` du drain : c'est ce banc qui ferme la piste GEMM (§5.2)
+* `verify_all.sh` — **rejoue toute la chaîne de validation** en une commande
+  (§3.5) ; sort non nul si quoi que ce soit diverge
+* `verify.c` — identité de Godfrey contre une **force brute** indépendante,
+  n = 1..16, et la condition de validité de la réduction ×4 (§3.2a)
+* `cover_check.c` — le **pont preuve ↔ code** : la couverture exacte vérifiée
+  exhaustivement sur l'indexation réelle du noyau, jusqu'à 1,07·10⁹ index à
+  n=31 (§3.2b)
+* `slice_ref.c` — recalcule une tranche `PART=` **depuis la définition de
+  Godfrey**, sans parité ni SWAR ni PTX ; `check_slices.sh` compare au bit près
+  (§3.2c)
+* `audit.sh` — dossier d'audit d'une campagne : complétude, empreintes des
+  binaires, cartes, et **recalcul redondant d'un échantillon** (§3.6)
 * `proof/Langford.lean` — **preuve Lean 4** que l'énumération du noyau couvre
   chaque point exactement une fois : involutivité de `f` et de σ, unicité du
   translaté épinglé de Klein (facteur 4 exact), trichotomie de la réflexion
@@ -1918,6 +2002,9 @@ Les briques de plus bas niveau, si besoin :
 * `struct.c` — vérification des identités de croisement du §5.4(a) et mesure du
   certificat de décès du §5.4(b)
 * `zfrac.c` — fraction de produits non nuls
+* `run_shard.sh` / `worker.sh` émettent la **provenance** de chaque tâche
+  (empreinte du binaire, carte, pilote, durée, horodatage) — c'est ce que
+  relit `audit.sh`
 * `estimate.c` — estimateur de Knuth non biaisé (CPU, OpenMP)
 * `find_langford.c` — recherche de solutions, avec vérification indépendante
 

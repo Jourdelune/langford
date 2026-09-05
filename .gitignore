@@ -17,6 +17,9 @@ fiber
 zfrac
 oe_check
 check_decomp
+slice_ref
+cover_check
+verify
 oe_ref
 oe_ref2
 single

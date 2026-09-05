@@ -21,8 +21,12 @@ fi
 K=$I
 while [ "$K" -lt "$T" ]; do
   if ! grep -q "^#$K " $OUT; then
-    R=$(./run_shard.sh "$K" "$T" "$N" 2>/dev/null | sed -n 's/^PART=\([0-9a-f:]*\).*/\1/p')
-    if [ -n "$R" ]; then echo "#$K $R" >> $OUT
+    O=$(./run_shard.sh "$K" "$T" "$N" 2>/dev/null)
+    R=$(echo "$O" | sed -n 's/^PART=\([0-9a-f:]*\).*/\1/p')
+    P=$(echo "$O" | sed -n 's/^PROV=//p')
+    # Champs 1 et 2 inchanges (#tache, somme) : collect.sh continue de marcher.
+    # La provenance est appendue derriere, pour audit.sh et pour un relecteur.
+    if [ -n "$R" ]; then echo "#$K $R $P" >> $OUT
     else echo "tache $K : aucune sortie" >&2; exit 1; fi
     echo "worker $I : tache $K/$T faite  ($(grep -c '^#' $OUT) au total)" >&2
   fi

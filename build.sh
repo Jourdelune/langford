@@ -24,7 +24,7 @@ nvcc -O3 $ARCH                   -o langford6 langford6.cu    # reference
 nvcc -O3 $ARCH -maxrregcount 32  -o langford5 langford5.cu 2>/dev/null || true
 nvcc -O3 $ARCH                   -o langford4 langford4.cu 2>/dev/null || true
 nvcc -O3 $ARCH                   -o langford3 langford3.cu 2>/dev/null || true
-for f in oe_check oe_ref oe_ref2 pfaff_test pfaff_zk fiber zfrac single powersums framework check_decomp; do
+for f in oe_check oe_ref oe_ref2 pfaff_test pfaff_zk fiber zfrac single powersums framework check_decomp verify cover_check slice_ref; do
   [ -f $f.c ] && gcc -O2 -o $f $f.c -lm 2>/dev/null || true
 done
 [ -f dpstates.cpp ] && g++ -O2 -o dpstates dpstates.cpp -lm 2>/dev/null || true

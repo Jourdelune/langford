@@ -702,14 +702,16 @@ typedef void (*kern_t)(uint32_t,uint32_t,uint32_t,uint32_t*);
 typedef void (*dker_t)(uint32_t*);
 #define DINST(NN) case NN: return (dker_t)diag_kernel<NN>;
 static dker_t dpick(int N){ switch(N){
-    DINST(11) DINST(12) DINST(15) DINST(16) DINST(19) DINST(20) DINST(23) DINST(24)
+    DINST(9)  DINST(10) DINST(11) DINST(12) DINST(13) DINST(14) DINST(15) DINST(16)
+    DINST(17) DINST(18) DINST(19) DINST(20) DINST(21) DINST(22) DINST(23) DINST(24)
     DINST(27) DINST(28) DINST(31) default: return NULL; } }
 #ifndef K_
 #define K_ 7          /* balaye : cf. README 4.5 */
 #endif
 #define INST(NN) case NN: return (kern_t)oe_kernel<NN,K_>;
 static kern_t pick(int N){ switch(N){
-    INST(11) INST(12) INST(15) INST(16) INST(19) INST(20) INST(23) INST(24)
+    INST(9)  INST(10) INST(11) INST(12) INST(13) INST(14) INST(15) INST(16)
+    INST(17) INST(18) INST(19) INST(20) INST(21) INST(22) INST(23) INST(24)
     INST(27) INST(28) INST(31) default: return NULL; } }
 
 int main(int argc,char**argv){
@@ -770,6 +772,19 @@ int main(int argc,char**argv){
 
     if(dev>=0) CHECK(cudaSetDevice(dev));   /* noeud multi-GPU : un worker par carte */
 
+    /* La reduction de symetrie n'est PAS valide pour tout n.  Nier la rangee o
+     * multiplie le produit par (-1)^{MO} et le poids (prod x_k) par (-1)^N :
+     * la sommande n'est invariante que si MO + N est pair, c'est-a-dire
+     * exactement quand N = 0 ou 3 (mod 4) -- precisement les n ou une suite de
+     * Langford existe.  Aux autres n le noyau rendait un nombre parfaitement
+     * faux et parfaitement credible : -n 9 annoncait 5558 la ou la reponse est
+     * 0.  `verify.c` le montre a chaque n de 1 a 16.  On refuse donc. */
+    if (N % 4 != 0 && N % 4 != 3){
+        fprintf(stderr,
+          "n=%d : aucune suite de Langford n'existe (n doit valoir 0 ou 3 mod 4),\n"
+          "et la reduction de symetrie de ce noyau y est INVALIDE -- il rendrait\n"
+          "un nombre faux sans qu'aucun auto-test ne s'en apercoive.  Voir verify.c\n", N);
+        return 1; }
     const int FREE = N-1;                       /* bits libres par rangee */
     if (FREE < K_ || FREE < 8){ fprintf(stderr,"n trop petit pour ce decoupage\n"); return 1; }
     const long long nvhi  = 1LL<<(FREE-K_);
