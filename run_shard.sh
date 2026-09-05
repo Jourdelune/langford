@@ -27,6 +27,10 @@ echo "tranche $I/$T : vhi $FROM..$((TO-1))  ($CNT valeurs)" >&2
 # le meme code.  On emet donc, en plus du PART=, une ligne PROV= portant
 # l'empreinte du binaire, la carte, le pilote et la duree.  `audit.sh` la relit.
 SHA=$(sha256sum ./langford6 2>/dev/null | cut -c1-16)
+# Le 4070 local tourne un binaire natif, les cartes louees le .fat
+# (deux architectures, cudart statique) : deux empreintes differentes
+# pour la MEME source.  C'est donc `src` qui doit etre unique, pas `sha`.
+SRC=$(sha256sum ./langford6.cu 2>/dev/null | cut -c1-16)
 GPU=$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -1 | tr ' ' '_')
 DRV=$(nvidia-smi --query-gpu=driver_version --format=csv,noheader 2>/dev/null | head -1)
 T0=$(date +%s)
@@ -34,5 +38,5 @@ OUT=$(./langford6 -n "$N" --from "$FROM" --count "$CNT" --chunk 64)
 RC=$?
 T1=$(date +%s)
 echo "$OUT"
-echo "PROV=task:$I/$T n:$N vhi:$FROM..$((TO-1)) sha:${SHA:-?} gpu:${GPU:-?} drv:${DRV:-?} sec:$((T1-T0)) utc:$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+echo "PROV=task:$I/$T n:$N vhi:$FROM..$((TO-1)) src:${SRC:-?} sha:${SHA:-?} gpu:${GPU:-?} drv:${DRV:-?} sec:$((T1-T0)) utc:$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 exit $RC

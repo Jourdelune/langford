@@ -39,12 +39,16 @@ echo "--- 2. auto-test arithmetique sur le total -----------------"
 ./langford6 -n "$N" --merge $(awk '{print $2}' "$F") | sed 's/^/  /'
 
 echo ""
-echo "--- 3. binaires utilises -----------------------------------"
-grep -o 'sha:[0-9a-f?]*' "$F" | sort | uniq -c | sed 's/^/  /'
-NSHA=$(grep -o 'sha:[0-9a-f?]*' "$F" | sort -u | wc -l)
-[ "$NSHA" -le 1 ] && echo "  -> un seul binaire : bien" \
-                  || echo "  -> ATTENTION : $NSHA binaires differents, a justifier"
-echo "  binaire local actuel : sha256 $(sha256sum ./langford6 | cut -c1-16)"
+echo "--- 3. code utilise ----------------------------------------"
+echo "  SOURCE (doit etre unique -- c'est le seul invariant qui compte) :"
+grep -o 'src:[0-9a-f?]*' "$F" | sort | uniq -c | sed 's/^/    /'
+NSRC=$(grep -o 'src:[0-9a-f?]*' "$F" | sort -u | wc -l)
+if [ "$NSRC" -le 1 ]; then echo "    -> une seule source : bien"
+else echo "    -> *** $NSRC sources differentes : le run melange deux codes ***"; fi
+echo "  binaires (plusieurs sont NORMAUX : le 4070 local compile en natif,"
+echo "  les cartes louees tournent le .fat -- meme source, builds differents) :"
+grep -o 'sha:[0-9a-f?]*' "$F" | sort | uniq -c | sed 's/^/    /'
+echo "  source locale actuelle : sha256 $(sha256sum ./langford6.cu | cut -c1-16)"
 
 echo ""
 echo "--- 4. cartes et pilotes -----------------------------------"

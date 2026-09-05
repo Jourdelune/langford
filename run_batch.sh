@@ -11,9 +11,13 @@ N=$1; T=$2; shift 2
 # binaire sur une carte identifiee.  Sans elle, une somme partielle n'est pas
 # auditable : on ne sait ni quel code l'a produite, ni sur quoi.
 SHA=$(sha256sum ./langford6 2>/dev/null | cut -c1-16)
+# Le 4070 local tourne un binaire natif, les cartes louees le .fat
+# (deux architectures, cudart statique) : deux empreintes differentes
+# pour la MEME source.  C'est donc `src` qui doit etre unique, pas `sha`.
+SRC=$(sha256sum ./langford6.cu 2>/dev/null | cut -c1-16)
 GPU=$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -1 | tr ' ' '_')
 DRV=$(nvidia-smi --query-gpu=driver_version --format=csv,noheader 2>/dev/null | head -1)
-PROV="sha:${SHA:-?},gpu:${GPU:-?},drv:${DRV:-?}"
+PROV="src:${SRC:-?},sha:${SHA:-?},gpu:${GPU:-?},drv:${DRV:-?}"
 for k in "$@"; do
   T0=$(date +%s)
   if [ "$k" = "D" ]; then
