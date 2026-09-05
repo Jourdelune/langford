@@ -339,13 +339,21 @@ def cmd_plan(a):
     print(f"n={n} : {base:.0f} h GPU (base 4070), cible {a.hours} h")
     print(f"  la 4070 locale en absorbe        {a.hours*1.0:.0f}  ({100*a.hours/base:.1f} %)")
     print(f"  reste a couvrir                  {rest:.0f} h GPU")
-    print(f"  une 5090 en fournit {a.ratio:.2f}/h -> {a.ratio*a.hours:.1f} h GPU en {a.hours} h")
-    print(f"\n  => {k} RTX 5090")
-    for p, lbl in ((0.20, "spot"), (0.35, "a la demande")):
+    print(f"  une {a.gpu} en fournit {a.ratio:.2f}/h -> {a.ratio*a.hours:.1f} h GPU en {a.hours} h")
+    print(f"\n  => {k} {a.gpu}")
+    spot, dem = (0.20, 0.35) if "5090" in a.gpu else (0.11, 0.25)
+    for p, lbl in ((spot, "spot"), (dem, "a la demande")):
         print(f"     {lbl:<14} {k} x {a.hours} h x {p:.2f} $ = {k*a.hours*p:6.2f} $")
-    print(f"\n  Rapport {a.ratio} : MESURE le 2026-09-04 sur une RTX 5090 louee,")
-    print(f"  a travail identique (memes vhi, un seul processus par carte).")
-    print(f"  Le modele d'architecture predisait 4,02 -- il etait 32 % trop optimiste.")
+    # Les deux rapports MESURES, avec la version sur laquelle ils l'ont ete.
+    # Ne rien affirmer d'autre : un --ratio passe a la main n'est pas une mesure.
+    print()
+    print(f"  Rapports mesures a ce jour, a travail identique (memes vhi, graine")
+    print(f"  fixe, un seul processus par carte) :")
+    print(f"    RTX 5090 : 3,05  (mesure le 2026-09-04, sur la v6.1)")
+    print(f"    RTX 4090 : 2,66  (mesure le 2026-09-05, sur la v7)")
+    if abs(a.ratio - 3.05) > 1e-9 and abs(a.ratio - 2.66) > 1e-9:
+        print(f"    -> le rapport {a.ratio} utilise ici n'est AUCUN des deux : c'est une")
+        print(f"       hypothese passee en ligne de commande, pas une mesure.")
 
 def cmd_bench(a):
     """Mesure le vrai debit de chaque worker. Le rapport 5090/4070 utilise par
@@ -559,7 +567,8 @@ def main():
     P = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     S = P.add_subparsers(dest="cmd", required=True)
     q = S.add_parser("init");   q.add_argument("-n", type=int, default=31); q.add_argument("-T", type=int, default=8192); q.set_defaults(f=cmd_init)
-    q = S.add_parser("plan");   q.add_argument("--hours", type=float, default=10); q.add_argument("--ratio", type=float, default=3.05); q.add_argument("--base", type=float, default=772); q.set_defaults(f=cmd_plan)
+    q = S.add_parser("plan");   q.add_argument("--hours", type=float, default=10); q.add_argument("--ratio", type=float, default=2.66); q.add_argument("--base", type=float, default=545)
+    q.add_argument("--gpu", default="RTX 4090"); q.set_defaults(f=cmd_plan)
     q = S.add_parser("offers"); q.add_argument("--count", type=int, default=12); q.add_argument("--bid", action="store_true")
     q.add_argument("--gpu", default="RTX 5090"); q.add_argument("--min-net", dest="min_net", type=float, default=100); q.add_argument("--verified", action="store_true"); q.set_defaults(f=cmd_offers)
     q = S.add_parser("up");     q.add_argument("--count", type=int, required=True); q.add_argument("--bid", type=float, default=0); q.add_argument("--max-price", type=float, default=0.40)
