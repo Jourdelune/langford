@@ -6,8 +6,8 @@ nombres. Exhiber une solution est trivial ; les compter toutes est un problème
 ouvert au-delà de n=28.
 
 Ce dépôt contient une implémentation CUDA de la méthode algébrique de Godfrey,
-poussée jusqu'à **6,99× plus vite** que mon point de départ — et **~47× plus
-vite que l'état de l'art publié, sur le même matériel** — avec au passage la
+poussée jusqu'à **6,99× plus vite** que mon point de départ — et **~43× plus
+vite que l'état de l'art publié, sur le même matériel** (§4.0) — avec au passage la
 fermeture — par preuve ou par mesure — de **quatre** pistes qui étaient
 jusque-là seulement « non abouties », dont les tensor cores (§5.2).
 
@@ -423,7 +423,47 @@ auto-tests, et recalculer les tranches de son choix.
 Tous les débits sont mesurés GPU au repos, moyennés sur des shards répartis
 (voir §4.6 : mesurer au mauvais endroit m'a coûté plusieurs heures).
 
-| version | Gsums/s | n=31 | gain |
+### 4.0  La chaîne complète, de 2015 à aujourd'hui
+
+Toutes les lignes donnent le coût de **n=31 sur la même RTX 4070**, ce qui rend
+les gains comparables entre eux. Le facteur de chaque ligne est son gain sur la
+ligne précédente ; le produit de la colonne vaut le total.
+
+| # | ce qui change | n=31 | gain | d'où vient le facteur |
+|---|---|---|---|---|
+| | **Godfrey nu (2002)** — aucune symétrie, arithmétique modulaire + CRT | ≈ 4 500 j | — | |
+| 1 | **symétrie d'ordre 4** — épingler 2 coordonnées (Assarpour, Bar-Noy & Liu, 2015) → **l'état de l'art publié** | **≈ 1 100 j** | **×4,1** | comptage de points, 2⁶² → 2⁶⁰ |
+| 2 | **bignum 160 bits tronqué** au lieu de modulaire + CRT (v1/v2) | 360 j | ×3,06 | **modèle** arithmétique (§6) |
+| 3 | **symétrie d'ordre 8** — la réflexion en plus du groupe de Klein (v3) | 180,1 j | ×2,00 | comptage de points, 2⁶⁰ → 2⁵⁹ |
+| 4 | **ne pas calculer les produits nuls** — 87 % le sont ; compaction des survivants en file par warp (v4, §4.1) | 101,7 j | ×1,77 | mesure appariée |
+| 5 | **demi-état + déroulage par 8** — seuls les écarts pairs décident de la survie (v5, §4.2) | 75,0 j | ×1,36 | mesure appariée |
+| 6 | **coordonnées de parité + bitmaps de survie** — la boucle chaude disparaît, le test tombe sous une instruction par point (v6, §4.3) | 34,0 j | ×2,21 | mesure appariée |
+| 7 | **chaînes de retenue PTX + extraction `prmt`** — ce que le C ne sait pas dire (v6.1, §4.9) | 30,9 j | ×1,10 | mesure appariée |
+| 8 | **écarts impairs tabulés + chemin rapide du produit + `LDS.64`** (v7, §4.10) | **25,8 j** | **×1,20** | mesure appariée |
+
+> **De l'état de l'art publié (2015) à la v7, sur le même matériel : ×42,6.**
+> Depuis Godfrey nu : ×174. Depuis mon point de départ mesurable (v3) : ×6,99.
+
+Trois précautions sur ce tableau.
+
+* **Une seule ligne est vraiment un modèle : la ligne 2.** La version publiée
+  n'est pas réimplémentée ici ; son coût est reconstitué à partir de ses deux
+  écarts avec ma v3 (symétrie ×4 au lieu de ×8, arithmétique modulaire + CRT au
+  lieu d'un bignum tronqué). Les facteurs ×4,1 et ×2,00 des lignes 1 et 3, eux,
+  sont exacts *par construction* : ils ne font que compter les points énumérés.
+  L'incertitude porte donc sur le ×3,06, d'où la fourchette 740 à 1 380 jours
+  pour la ligne 1 et un total de **×29 à ×54** (dérivation au §6).
+* **Les lignes 4 à 8 sont des rapports mesurés**, chacun GPU au repos et
+  apparié sur le même échantillon de `vhi` — c'est le rapport qui est fiable,
+  pas les absolus, qui portent ±8 % (§7.1).
+* **Deux comptabilités coexistent.** Ce tableau est sur la base des débits
+  nominaux en Gsums/s. La mesure directe de bout en bout de la v7 donne 24,4 j
+  plutôt que 25,8, soit ×45 depuis 2015 — c'est le chiffre du §6. L'écart de
+  6 % est dans les ±8 % ci-dessus.
+
+### 4.0bis  Le détail par version
+
+| version | Gsums/s | n=31 | gain cumulé depuis v3 |
 |---|---|---|---|
 | v3 — Godfrey + symétrie ×8 | 37,0 | 180,1 j | — |
 | v4 — saut des termes nuls | 65,6 | 101,7 j | ×1,77 |
@@ -1478,6 +1518,12 @@ symétrie manquante double le nombre de points :
 > **≈ 1 100 jours contre 24,4 mesurés : ~45× à matériel identique.**
 > Fourchette 740 à 1 380 jours selon la qualité de l'implémentation modulaire,
 > soit **30× à 57×**. Le 5,30× du §4 n'en est que la partie v3 → v6.
+>
+> Le **§4.0 décompose ce facteur étape par étape** — chaque optimisation avec
+> son gain propre, le produit valant le total. Il l'exprime sur la base des
+> débits nominaux (25,8 j pour la v7, donc ×42,6) plutôt que sur la mesure
+> directe (24,4 j, donc ×45) ; l'écart de 6 % est dans les ±8 % d'erreur
+> d'échantillonnage du §7.1.
 
 Deux précautions. D'abord ce chiffrage est **favorable au point de comparaison** :
 il lui prête mon code de Gray, mon empaquetage SWAR et mon arbre de produit, et
