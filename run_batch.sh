@@ -17,7 +17,12 @@ SHA=$(sha256sum ./langford6 2>/dev/null | cut -c1-16)
 SRC=$(sha256sum ./langford6.cu 2>/dev/null | cut -c1-16)
 GPU=$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -1 | tr ' ' '_')
 DRV=$(nvidia-smi --query-gpu=driver_version --format=csv,noheader 2>/dev/null | head -1)
-PROV="src:${SRC:-?},sha:${SHA:-?},gpu:${GPU:-?},drv:${DRV:-?}"
+# Sur un noeud multi-GPU, chaque worker est epingle sur une carte par
+# CUDA_VISIBLE_DEVICES : on le consigne, sinon quatorze workers d'une meme
+# machine rendent une provenance rigoureusement identique et l'audit ne peut
+# plus dire quelle carte a produit quelle somme partielle.  nvidia-smi, lui,
+# ne filtre PAS sur CUDA_VISIBLE_DEVICES : `gpu:` nomme toujours la carte 0.
+PROV="src:${SRC:-?},sha:${SHA:-?},gpu:${GPU:-?},drv:${DRV:-?},dev:${CUDA_VISIBLE_DEVICES:-all}"
 for k in "$@"; do
   T0=$(date +%s)
   if [ "$k" = "D" ]; then

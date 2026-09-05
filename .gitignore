@@ -53,3 +53,6 @@ orch.log
 langford6.fat
 langford6.prev
 tensorcheck
+
+# caches Python (dashboard.py importe orchestrator.py)
+__pycache__/

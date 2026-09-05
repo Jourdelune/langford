@@ -54,6 +54,13 @@ IMAGE  = IMAGE_BASE
 SEND   = ["langford6.cu", "build.sh", "run_shard.sh", "run_batch.sh"]
 LOCK   = threading.Lock()
 STOP   = threading.Event()
+# Provisionnement : une fois par MACHINE.  Sur un noeud 14x, quatorze fils
+# feraient sinon quatorze `scp` concurrents vers le meme /root, puis se
+# disputeraient le `mv -f langford6.fat langford6` -- un worker peut alors
+# executer un binaire lu a moitie ecrit.  Le premier fil arrive provisionne,
+# les treize autres attendent son verdict.
+_PROV    = {}                 # (hote, port) -> [Event, ok, cartes_occupees]
+_PROV_LK = threading.Lock()
 
 def log(*a): print(time.strftime("%H:%M:%S"), *a, flush=True)
 
@@ -135,6 +142,11 @@ def db():
     # Migration : les bases d'avant la tracabilite n'ont pas la colonne `prov`.
     try: c.execute("ALTER TABLE tasks ADD COLUMN prov TEXT")
     except sqlite3.OperationalError: pass     # deja la, ou table pas encore creee
+    # Migration : `dev` porte l'indice de carte sur un noeud multi-GPU (-1 = la
+    # machine n'a qu'une carte).  Sans elle, quatorze workers sur un meme hote
+    # lancent quatorze processus qui tapent TOUS sur le device 0.
+    try: c.execute("ALTER TABLE workers ADD COLUMN dev INTEGER DEFAULT -1")
+    except sqlite3.OperationalError: pass
     return c
 
 SCHEMA = """
@@ -146,7 +158,8 @@ CREATE TABLE IF NOT EXISTS tasks(
 CREATE INDEX IF NOT EXISTS i_status ON tasks(status, lease);
 CREATE TABLE IF NOT EXISTS workers(
   name TEXT PRIMARY KEY, kind TEXT, inst INTEGER, host TEXT, port INTEGER,
-  price REAL, state TEXT, seen REAL, ndone INTEGER DEFAULT 0, spv REAL);
+  price REAL, state TEXT, seen REAL, ndone INTEGER DEFAULT 0, spv REAL,
+  dev INTEGER DEFAULT -1);
 """
 
 def meta(c, k, v=None):
@@ -219,7 +232,12 @@ def remaining(c):
     return c.execute("SELECT COUNT(*) FROM tasks WHERE status!='done'").fetchone()[0]
 
 # ------------------------------------------------------------------ workers
-SSH = ["ssh", "-i", KEYF, "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null",
+# IdentitiesOnly=yes : sans lui, ssh propose d'abord toutes les cles de
+# l'agent, et sshd coupe a la sixieme tentative ("Too many authentication
+# failures") avant meme d'essayer .ssh_orch.  Constate le 2026-09-05 sur la
+# premiere connexion au noeud 14x.
+SSH = ["ssh", "-i", KEYF, "-o", "IdentitiesOnly=yes",
+       "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null",
        "-o", "ConnectTimeout=20", "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=4",
        "-o", "LogLevel=ERROR", "-o", "BatchMode=yes"]
 
@@ -228,6 +246,26 @@ def ssh_cmd(w, cmd, timeout=None):
                           capture_output=True, text=True, timeout=timeout)
 
 def provision(w):
+    """Provisionne une fois par machine, puis ecarte les cartes deja occupees."""
+    key = (w["host"], w["port"])
+    with _PROV_LK:
+        ent = _PROV.get(key)
+        first = ent is None
+        if first: ent = [threading.Event(), False, set()]; _PROV[key] = ent
+    if first:
+        try: ent[1] = _provision_host(w, ent)
+        finally: ent[0].set()
+    else:
+        while not ent[0].wait(5):
+            if STOP.is_set(): return False
+    if not ent[1]: return False
+    dev = w.get("dev")
+    if (dev if dev is not None and dev >= 0 else 0) in ent[2]:
+        log(f"{w['name']} : carte {dev} deja occupee -- worker ecarte")
+        return False
+    return True
+
+def _provision_host(w, ent):
     """Attend le SSH, envoie les sources, compile. Idempotent : relancable."""
     for _ in range(60):
         if STOP.is_set(): return False
@@ -242,19 +280,50 @@ def provision(w):
     # d'utilisation avant meme qu'on lance quoi que ce soit -- elle mesurait
     # 0,85x une 4070 au lieu de 2,8x. Refuser la machine coute moins cher que
     # de payer un sixieme de GPU pendant dix heures.
-    r = ssh_cmd(w, "nvidia-smi --query-gpu=memory.used,utilization.gpu --format=csv,noheader,nounits", timeout=60)
-    try:
-        mem, util = (int(x.strip()) for x in r.stdout.strip().split(",")[:2])
+    # Une machine a 14 cartes rend 14 lignes.  L'ancien code faisait
+    # split(",")[:2] sur la sortie ENTIERE : le second champ valait "0\n0" et
+    # int() levait, exception avalee -> le garde-fou se desactivait en silence
+    # sur exactement le type de noeud ou il sert le plus.  On lit desormais
+    # ligne par ligne et on n'ecarte que les cartes reellement prises ; les
+    # autres restent utilisables, car on a paye pour toute la machine.
+    # Tuer le maitre ne tue pas les calculs distants : ils continuent, leur
+    # sortie part dans un tuyau SSH mort, et au redemarrage le controle
+    # d'occupation ci-dessous prend NOS PROPRES orphelins pour un locataire
+    # concurrent -- le 2026-09-05, trois cartes sur huit ainsi ecartees a tort.
+    # On nettoie donc avant de regarder.  C'est sans danger ici : provision()
+    # ne tourne qu'une fois par machine, avant que le moindre worker de cette
+    # machine n'ait lance quoi que ce soit, et .run.lock interdit deux maitres.
+    ssh_cmd(w, "pkill -f langford6 || true", timeout=60)
+    time.sleep(3)
+    r = ssh_cmd(w, "nvidia-smi --query-gpu=memory.used,utilization.gpu --format=csv,noheader,nounits 2>&1", timeout=60)
+    # Certains hotes interposent un faux nvidia-smi : constate le 2026-09-05 sur
+    # la machine 148840, qui annoncait 8 RTX 4090 via /opt/fake/nvml_reader.py
+    # alors qu'aucun noyau sm_89 ne s'executait sur ces cartes.  Ce que la carte
+    # DIT d'elle-meme ne prouve rien ; seul le calcul le prouve (cf. _selftest).
+    if "/opt/fake" in r.stdout or "nvml_reader" in r.stdout:
+        log(f"{w['name']} : nvidia-smi truque (/opt/fake/nvml_reader.py) -- machine refusee")
+        return False
+    seen = 0
+    for i, line in enumerate(r.stdout.strip().splitlines()):
+        try: mem, util = (int(x.strip()) for x in line.split(",")[:2])
+        except Exception: continue
+        seen += 1
         if mem > 2000 or util > 25:
-            log(f"{w['name']} : carte deja occupee ({mem} Mo, {util} %) -- ecartee")
-            return False
-    except Exception:
+            log(f"{w['name']} : carte {i} occupee ({mem} Mo, {util} %) -- ecartee")
+            ent[2].add(i)
+    if not seen:
         log(f"{w['name']} : etat GPU illisible, on continue")
+    elif len(ent[2]) == seen:
+        log(f"{w['name']} : les {seen} cartes sont prises -- machine refusee")
+        return False
+    else:
+        log(f"{w['name']} : {seen} carte(s), {seen - len(ent[2])} libre(s)")
 
     files = [os.path.join(HERE, f) for f in SEND]
     fat = os.path.join(HERE, "langford6.fat")
     if os.path.exists(fat): files.append(fat)
-    subprocess.run(["scp", "-i", KEYF, "-o", "StrictHostKeyChecking=no",
+    subprocess.run(["scp", "-i", KEYF, "-o", "IdentitiesOnly=yes",
+                    "-o", "StrictHostKeyChecking=no",
                     "-o", "UserKnownHostsFile=/dev/null", "-o", "LogLevel=ERROR",
                     "-P", str(w["port"])] + files +
                    [f"root@{w['host']}:/root/"], check=True, timeout=600)
@@ -265,14 +334,25 @@ def provision(w):
     # vraiment sur la carte distante ; sinon on retombe sur la compilation.
     if os.path.exists(fat):
         r = ssh_cmd(w, "cd /root && chmod +x *.sh langford6.fat && "
-                       "mv -f langford6.fat langford6 && ./langford6 -n 12 2>/dev/null | tail -1",
+                       "mv -f langford6.fat langford6 && ./langford6 -n 12 2>&1 | tail -2",
                     timeout=180)
         if "108144" in r.stdout:          # L(2,12) : le binaire calcule juste ici
             log(f"{w['name']} : binaire prefabrique operationnel"); return True
-        log(f"{w['name']} : binaire prefabrique inutilisable, compilation")
+        log(f"{w['name']} : binaire prefabrique inutilisable ({r.stdout.strip()[-120:]}), compilation")
     r = ssh_cmd(w, "cd /root && chmod +x *.sh && nvcc -O3 -arch=native -o langford6 langford6.cu 2>&1 | tail -3 && ls -l langford6", timeout=900)
-    if r.returncode != 0 or "langford6" not in r.stdout:
-        log(f"{w['name']} : compilation echouee : {(r.stdout + r.stderr)[-300:]}"); return False
+    # `ls -l langford6` NE PROUVE RIEN : le .fat a deja ete renome en langford6
+    # juste au-dessus, donc le fichier existe meme si nvcc est absent -- et
+    # `nvcc ... | tail -3` rend le code de sortie de tail, soit 0.  Le
+    # 2026-09-05, cette double faille a fait declarer "pret" huit workers dont
+    # le binaire levait "no kernel image is available", puis tourner a vide en
+    # "lot vide, pause" jusqu'a ce qu'on regarde a la main.  On ne se fie donc
+    # plus qu'a un calcul verifiable.
+    r = ssh_cmd(w, "cd /root && ./langford6 -n 12 2>&1 | tail -2", timeout=300)
+    if "108144" not in r.stdout:
+        log(f"{w['name']} : binaire inutilisable, machine ecartee : "
+            f"{(r.stdout + r.stderr).strip()[-200:]}")
+        return False
+    log(f"{w['name']} : compile sur place, L(2,12) verifie")
     return True
 
 def worker_loop(w, n, T):
@@ -282,6 +362,14 @@ def worker_loop(w, n, T):
     if w["kind"] != "local" and not provision(w): return
     log(f"{w['name']} : pret")
     spv = w.get("spv") or 0.35
+    dev = w.get("dev")
+    dev = dev if dev is not None and dev >= 0 else None
+    # Sans cet epinglage, les N processus d'un noeud multi-GPU se pressent tous
+    # sur le device 0 : on paie N cartes pour en utiliser une.
+    pre = f"CUDA_VISIBLE_DEVICES={dev} " if dev is not None else ""
+    # Demarrage echelonne : quatorze poignees de main SSH simultanees tombent
+    # sous le MaxStartups 10:30:100 par defaut de sshd, qui en refuse une partie.
+    if dev: time.sleep(min(dev, 20) * 2)
     while not STOP.is_set() and remaining(c):
         per   = per_task(spv, n, T)               # duree estimee d'une tache
         batch = max(1, min(64, int(360 / max(per, 1e-9))))
@@ -289,11 +377,13 @@ def worker_loop(w, n, T):
         if not ids:
             time.sleep(20); continue
         t0 = time.time(); got = 0
-        cmd = f"cd /root && ./run_batch.sh {n} {T} " + " ".join(ids)
+        cmd = f"cd /root && {pre}./run_batch.sh {n} {T} " + " ".join(ids)
         try:
             if w["kind"] == "local":
+                env = dict(os.environ)
+                if dev is not None: env["CUDA_VISIBLE_DEVICES"] = str(dev)
                 p = subprocess.Popen(["./run_batch.sh", str(n), str(T)] + ids, cwd=HERE,
-                                     stdout=subprocess.PIPE, text=True, bufsize=1)
+                                     stdout=subprocess.PIPE, text=True, bufsize=1, env=env)
             else:
                 p = subprocess.Popen(SSH + ["-p", str(w["port"]), f"root@{w['host']}", cmd],
                                      stdout=subprocess.PIPE, text=True, bufsize=1)
@@ -368,13 +458,14 @@ def cmd_bench(a):
     c = db(); n = int(meta(c, "n") or 31)
     try: refresh(c)
     except SystemExit as e: log(str(e))
-    rows = list(c.execute("SELECT name,kind,host,port,state FROM workers"))
-    for name, kind, host, port, state in rows:
-        w = dict(name=name, kind=kind, host=host, port=port)
+    rows = list(c.execute("SELECT name,kind,host,port,state,dev FROM workers"))
+    for name, kind, host, port, state, dev in rows:
+        w = dict(name=name, kind=kind, host=host, port=port, dev=dev)
+        pre = f"CUDA_VISIBLE_DEVICES={dev} " if dev is not None and dev >= 0 else ""
         if kind != "local":
             if not host: log(f"{name} : pas d'adresse SSH, ignore"); continue
             if not provision(w): continue
-            r = ssh_cmd(w, f"cd /root && ./langford6 -n {n} --bench {a.samples}", timeout=3600)
+            r = ssh_cmd(w, f"cd /root && {pre}./langford6 -n {n} --bench {a.samples}", timeout=3600)
             out = r.stdout
         else:
             out = subprocess.run([os.path.join(HERE, "langford6"), "-n", str(n),
@@ -392,10 +483,24 @@ def cmd_bench(a):
         for name, spv in c.execute("SELECT name,spv FROM workers WHERE spv>0 AND name!='local'"):
             print(f"  {name:<14} x{base[0]/spv:.2f}")
 
+def onstart_script(pub):
+    """Injecte la cle de l'orchestrateur dans l'instance.
+
+    `chmod go-w /root` n'est pas cosmetique : sshd tourne en StrictModes et
+    verifie les droits de TOUTE la chaine -- /root, /root/.ssh, puis le fichier.
+    Certaines images livrent /root accessible en ecriture au groupe, et sshd
+    refuse alors la cle avec "bad ownership or modes for file
+    /root/.ssh/authorized_keys" -- un message qui accuse le fichier alors que
+    le coupable est le repertoire parent.  Constate le 2026-09-05 sur
+    l'image base + machine 134673 : instance louee, `running`, et injoignable.
+    """
+    return ("chmod go-w /root && mkdir -p /root/.ssh && chmod 700 /root/.ssh && "
+            "echo '%s' >> /root/.ssh/authorized_keys && "
+            "chmod 600 /root/.ssh/authorized_keys && chown -R root:root /root/.ssh" % pub)
+
 def cmd_up(a):
     pub = ensure_key()
-    onstart = ("mkdir -p /root/.ssh && echo '%s' >> /root/.ssh/authorized_keys && "
-               "chmod 700 /root/.ssh && chmod 600 /root/.ssh/authorized_keys" % pub)
+    onstart = onstart_script(pub)
     kind = "bid" if a.bid else "on-demand"
     offs = offers(kind, limit=300, gpu=a.gpu, min_net=a.min_net, verified=a.verified)
     if not offs: sys.exit("aucune offre 5090 disponible")
@@ -482,10 +587,23 @@ def cmd_add(a):
         g = m.groups()
         port, host = (int(g[0]), g[1]) if g[0].isdigit() else (int(g[1]), g[0])
     if not host or not port: sys.exit("il faut --ssh '...' ou --host H --port P")
-    c = db(); name = a.name or f"ssh{port}"
-    c.execute("INSERT OR REPLACE INTO workers(name,kind,host,port,price,state,seen) "
-              "VALUES(?,'ssh',?,?,?,'running',?)", (name, host, port, a.price, time.time()))
-    log(f"{name} -> root@{host}:{port}")
+    c = db(); base = a.name or f"ssh{port}"
+    g = max(1, a.gpus)
+    # Un worker par CARTE, et non un worker par machine qui repartirait en
+    # interne : c'est le seul decoupage qui garde juste le dimensionnement des
+    # lots.  `batch` vaut min(64, 360/duree_tache) et une tache n=31 dure ~2 min
+    # sur une 4090, donc le lot vaut 2 ou 3.  Un fan-out interne a run_batch.sh
+    # ne serait jamais alimente : treize cartes sur quatorze resteraient au
+    # repos, et le spv mesure -- du temps de paroi par tache -- ne le revelerait
+    # jamais, donc le lot ne grandirait pas non plus.  Le bail, la reprise apres
+    # preemption et le spv restent en outre par carte, donc justes.
+    rows = ([(base, a.price, -1)] if g == 1 else
+            [(f"{base}g{i}", a.price / g, i) for i in range(g)])
+    for name, price, dev in rows:
+        c.execute("INSERT OR REPLACE INTO workers(name,kind,host,port,price,state,seen,dev) "
+                  "VALUES(?,'ssh',?,?,?,'running',?,?)",
+                  (name, host, port, price, time.time(), dev))
+    log(f"{base} -> root@{host}:{port}  ({g} carte(s), {a.price:.2f} $/h au total)")
 
 def refresh(c):
     """Recolle les adresses SSH depuis l'API et retire les instances mortes."""
@@ -518,8 +636,8 @@ def cmd_run(a):
         try: refresh(c)
         except SystemExit as e: log(str(e)); log("-> on continue avec la seule 4070 locale")
     ws = []
-    for r in c.execute("SELECT name,kind,inst,host,port,state,spv FROM workers").fetchall():
-        w = dict(zip("name kind inst host port state spv".split(), r))
+    for r in c.execute("SELECT name,kind,inst,host,port,state,spv,dev FROM workers").fetchall():
+        w = dict(zip("name kind inst host port state spv dev".split(), r))
         if w["kind"] != "local" and (a.local_only or not w["host"]): continue
         ws.append(w)
     log(f"{len(ws)} worker(s) : " + ", ".join(w["name"] for w in ws))
@@ -610,7 +728,9 @@ def main():
     q.add_argument("--send", choices=["sms", "email"], help="faire envoyer le code d'abord")
     q.set_defaults(f=cmd_tfa)
     q = S.add_parser("sshkey"); q.set_defaults(f=cmd_sshkey)
-    q = S.add_parser("add");    q.add_argument("--ssh"); q.add_argument("--host"); q.add_argument("--port", type=int); q.add_argument("--name"); q.add_argument("--price", type=float, default=0.35); q.set_defaults(f=cmd_add)
+    q = S.add_parser("add");    q.add_argument("--ssh"); q.add_argument("--host"); q.add_argument("--port", type=int); q.add_argument("--name"); q.add_argument("--price", type=float, default=0.35)
+    q.add_argument("--gpus", type=int, default=1, help="cartes de la machine : un worker par carte")
+    q.set_defaults(f=cmd_add)
     q = S.add_parser("bench"); q.add_argument("--samples", type=int, default=96); q.set_defaults(f=cmd_bench)
     q = S.add_parser("run");    q.add_argument("--local-only", action="store_true"); q.set_defaults(f=cmd_run)
     q = S.add_parser("status"); q.set_defaults(f=cmd_status)
