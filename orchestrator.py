@@ -81,11 +81,11 @@ def api_key():
     if not k: sys.exit(".env : ni VAST_SESSION_KEY ni VAST_API_KEY")
     return k
 
-def api(method, path, body=None, auth=True):
+def api(method, path, body=None, auth=True, key=None):
     req = urllib.request.Request(API + path, method=method,
         data=json.dumps(body).encode() if body is not None else None)
     req.add_header("Content-Type", "application/json")
-    if auth: req.add_header("Authorization", "Bearer " + api_key())
+    if auth: req.add_header("Authorization", "Bearer " + (key or api_key()))
     try:
         with urllib.request.urlopen(req, timeout=60) as r: return json.load(r)
     except urllib.error.HTTPError as e:
@@ -407,7 +407,13 @@ def cmd_up(a):
         img = IMAGE_DEVEL if getattr(a, "image", "base") == "devel" else IMAGE_BASE
         body = {"client_id": "me", "image": img, "disk": 12, "runtype": "ssh",
                 "onstart": onstart, "env": {}}
-        if a.bid: body["price"] = round(max(off.get("min_bid", 0) * 1.05, a.bid), 4)
+        # Encherir au ras du plancher, c'est se designer comme premier evince.
+        # Mesure du 2026-09-05 : a min_bid x 1,05, six instances sur neuf se
+        # sont arretees dans les dix minutes et le debit est tombe a 3 taches en
+        # douze minutes.  Le multiplicateur par defaut est donc 1,5 ; --bid fixe
+        # un plancher absolu, --bid-mult le multiplicateur.
+        if a.bid is not None:
+            body["price"] = round(max(off.get("min_bid", 0) * a.bid_mult, a.bid or 0), 4)
         try: r = api("PUT", f"asks/{off['id']}/", body)
         except SystemExit as e:
             if "Two Factor" in str(e): raise
@@ -438,7 +444,7 @@ def cmd_tfa(a):
     --send sms|email demande d'abord l'envoi du code et affiche le `secret`
     qu'il faut ensuite repasser avec le code (le TOTP, lui, n'en a pas besoin)."""
     if a.send:
-        r = api("POST", f"tfa/{a.send}/", {})
+        r = api("POST", f"tfa/{a.send}/", {}, key=env_get("VAST_API_KEY"))
         sec = r.get("secret") or r.get("tfa_secret")
         log(f"code envoye par {a.send}. Puis :")
         log(f"  ./orchestrator.py tfa --method {a.send} --secret {sec} --code <CODE>")
@@ -447,7 +453,7 @@ def cmd_tfa(a):
     else:             body = {"tfa_method": a.method, "code": str(a.code)}
     if a.secret:      body["secret"] = a.secret
     if a.method_id:   body["tfa_method_id"] = a.method_id
-    r = api("POST", "tfa/", body)
+    r = api("POST", "tfa/", body, key=env_get("VAST_API_KEY"))
     sk = r.get("session_key")
     if not sk: sys.exit(f"pas de session_key dans la reponse : {str(r)[:200]}")
     env_set("VAST_SESSION_KEY", sk)
@@ -591,7 +597,9 @@ def main():
     q.add_argument("--gpu", default="RTX 4090"); q.set_defaults(f=cmd_plan)
     q = S.add_parser("offers"); q.add_argument("--count", type=int, default=12); q.add_argument("--bid", action="store_true")
     q.add_argument("--gpu", default="RTX 5090"); q.add_argument("--min-net", dest="min_net", type=float, default=100); q.add_argument("--verified", action="store_true"); q.set_defaults(f=cmd_offers)
-    q = S.add_parser("up");     q.add_argument("--count", type=int, required=True); q.add_argument("--bid", type=float, default=0); q.add_argument("--max-price", type=float, default=0.40)
+    q = S.add_parser("up");     q.add_argument("--count", type=int, required=True); q.add_argument("--bid", type=float, default=None); q.add_argument("--max-price", type=float, default=0.40)
+    q.add_argument("--bid-mult", dest="bid_mult", type=float, default=1.5,
+                   help="enchere = min_bid x CE facteur ; 1,05 fait preempter en continu")
     q.add_argument("--image", choices=["base", "devel"], default="base",
                    help="base (200 Mo, exige langford6.fat) ou devel (6 Go, compile sur place)")
     q.add_argument("--gpu", default="RTX 5090"); q.add_argument("--min-net", dest="min_net", type=float, default=400); q.add_argument("--verified", action="store_true"); q.set_defaults(f=cmd_up)
