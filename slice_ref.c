@@ -66,33 +66,58 @@ int main(int argc, char **argv){
     const uint32_t u0 = (uint32_t)(b0 < 0 ? 0 : b0) * 256u;
     const uint32_t uend = 1u << FREE;
 
-    u160 acc; memset(&acc, 0, sizeof acc);
-    for (uint32_t u = u0; u < uend; u++){
-        uint32_t rvF = brev32(u << 1) >> (32 - N);
-        uint32_t o = (rvF & 1u) ? (rvF ^ ALLB) : rvF;
-        for (uint32_t el = 0; el < NL; el++){
-            uint32_t v = ((uint32_t)VHI << K) | el;
-            if (!(v < u)) continue;                     /* predicat canonique du noyau */
-            uint32_t e = v << 1;
-            /* reconstruire X : rangee o aux positions impaires, e aux paires */
-            uint64_t b = 0;
-            for (int j = 0; j < N; j++){
-                if ((o >> j) & 1u) b |= 1ULL << (2*j);
-                if ((e >> j) & 1u) b |= 1ULL << (2*j + 1);
-            }
-            u160 z; memset(&z, 0, sizeof z); z.w[0] = 1;
-            int neg = 0, zero = 0;
-            for (int i = 2; i <= N + 1; i++){
-                int a = Adirect(b, i);
-                if (!a){ zero = 1; break; }
-                if (a < 0){ neg ^= 1; a = -a; }
-                mul_small(&z, (uint32_t)a);
-            }
-            if (zero) continue;
-            if (__builtin_popcountll(b) & 1) neg ^= 1;  /* le poids prod x_k */
-            if (neg) sub160(&acc, &z); else add160(&acc, &z);
-        }
+    /* Reconstruction de X : la rangee o occupe les positions PAIRES du masque
+     * (bit 2j), la rangee e les IMPAIRES (bit 2j+1).  Les deux moities sont
+     * independantes, donc on les tabule au lieu de refaire la boucle en j pour
+     * chaque point : c'est la seule optimisation, elle ne touche pas au calcul. */
+    uint64_t *etab = malloc((size_t)NL * sizeof *etab);
+    if (!etab) { fprintf(stderr, "memoire\n"); return 2; }
+    for (uint32_t el = 0; el < NL; el++){
+        uint32_t e = (((uint32_t)VHI << K) | el) << 1;
+        uint64_t x = 0;
+        for (int j = 0; j < N; j++) if ((e >> j) & 1u) x |= 1ULL << (2*j + 1);
+        etab[el] = x;
     }
+
+    u160 acc; memset(&acc, 0, sizeof acc);
+#ifdef _OPENMP
+#pragma omp parallel
+#endif
+    {
+        u160 loc; memset(&loc, 0, sizeof loc);
+#ifdef _OPENMP
+#pragma omp for schedule(dynamic, 256) nowait
+#endif
+        for (long long uu = u0; uu < (long long)uend; uu++){
+            uint32_t u = (uint32_t)uu;
+            uint32_t rvF = brev32(u << 1) >> (32 - N);
+            uint32_t o = (rvF & 1u) ? (rvF ^ ALLB) : rvF;
+            uint64_t obits = 0;
+            for (int j = 0; j < N; j++) if ((o >> j) & 1u) obits |= 1ULL << (2*j);
+            uint32_t vbase = (uint32_t)VHI << K;
+            uint32_t elmax = (u > vbase) ? (u - vbase) : 0;   /* predicat v < u */
+            if (elmax > NL) elmax = NL;
+            for (uint32_t el = 0; el < elmax; el++){
+                uint64_t b = obits | etab[el];
+                u160 z; memset(&z, 0, sizeof z); z.w[0] = 1;
+                int neg = 0, zero = 0;
+                for (int i = 2; i <= N + 1; i++){
+                    int a = Adirect(b, i);
+                    if (!a){ zero = 1; break; }
+                    if (a < 0){ neg ^= 1; a = -a; }
+                    mul_small(&z, (uint32_t)a);
+                }
+                if (zero) continue;
+                if (__builtin_popcountll(b) & 1) neg ^= 1;   /* le poids prod x_k */
+                if (neg) sub160(&loc, &z); else add160(&loc, &z);
+            }
+        }
+#ifdef _OPENMP
+#pragma omp critical
+#endif
+        add160(&acc, &loc);          /* l'addition mod 2^160 est associative */
+    }
+    free(etab);
     shl1(&acc);                                          /* poids 2 : moitie canonique */
     printf("PART=%08x:%08x:%08x:%08x:%08x   (ref n=%d vhi=%lld)\n",
            acc.w[4], acc.w[3], acc.w[2], acc.w[1], acc.w[0], N, VHI);

@@ -192,6 +192,20 @@ C'est ce contrôle-là qui ferme la décomposition de parité, l'arithmétique
 160 bits et le chemin rapide **en une fois**, et qui atteint enfin n=27, 28 et
 31 — que le §3.3 signalait comme jamais exercés.
 
+`slice_ref` est parallélisé (OpenMP), ce qui met à portée les deux régimes
+extrêmes de n=31, et pas seulement la queue bon marché :
+
+| tranche n=31 | points recalculés | régime | durée (18 fils) | |
+|---|---|---|---|---|
+| `vhi=0` | 1,37·10¹¹ | **shard dégénéré**, 87,9 % de survivants | 15 min | identique |
+| `vhi=4194304` | 6,87·10¹⁰ | **milieu exact** de la plage | 7 min 45 | identique |
+| `vhi=8000000` … `8388607` | 10⁸ – 10¹⁰ | queue, réflexion élaguante | secondes | identiques |
+
+Les deux régimes extrêmes du §4.7 — celui où presque tout survit et celui où
+presque tout est élagué — sont donc vérifiés au bit près **à n=31**, ainsi que
+le milieu. Le seul reproche qui subsiste est de porter sur neuf valeurs de
+`vhi` sur 8 388 608, pas sur la couverture des cas de figure.
+
 **(d) Les valeurs connues, de bout en bout.** n = 11, 12, 15, 16, 19, 20, 23, 24
 reproduites à l'unité près par le binaire courant.
 
@@ -210,12 +224,6 @@ les largeurs de masque et les comptes d'écarts propres à ces n. Mais aucun
 **total** n'a été calculé à n=27/28, et c'est le seul endroit où une erreur
 d'agrégation se verrait. Coût : ~2,6 h + ~10,6 h.
 
-**Le milieu de la plage de `vhi` à n=31.** `slice_ref` est en O(points de la
-tranche) : les tranches de queue sont vérifiables en secondes, celles du milieu
-demanderaient des jours. Les cinq tranches n=31 vérifiées sont donc toutes dans
-le dernier millième de la plage. Le code exécuté y est le même, mais les
-données sont moins variées.
-
 **Une erreur d'un seul bit dans les bits hauts d'une tranche.** Les auto-tests
 ne contraignent que les bits bas (16 par tranche, 63 sur le total) ; un bit
 inversé au-delà passe les deux. `audit.sh` le couvre maintenant **par sondage** :
@@ -228,6 +236,60 @@ indépendantes.** Rien ne l'exclut ; c'est la limite ordinaire de ce genre de
 calcul. C'est aussi pourquoi il n'existe **aucun moyen connu de vérifier ce
 résultat plus vite que de le recalculer** : pas de certificat succinct, c'est le
 corollaire direct du 4ⁿ du §5.
+
+### 3.3bis  Quel risque reste-t-il, chiffré
+
+Deux risques de nature très différente, et c'est le second qui domine.
+
+**Risque systématique — l'algorithme ou le code est faux.** Après le §3.2, ce
+qu'il faudrait pour qu'il le soit encore : que l'identité de Godfrey, vérifiée
+contre une force brute à tous les n de 1 à 16 ; que la couverture, prouvée en
+Lean *et* vérifiée exhaustivement sur les 1,07·10⁹ index de n=31 ; et que neuf
+tranches de n=31 identiques au bit près à un recalcul depuis la définition —
+dont les deux régimes extrêmes et le milieu — partagent toutes le **même** angle
+mort. Je l'estime **bien en dessous de 1 %**. Ce qui subsiste n'est pas une
+faiblesse identifiée mais la possibilité générique d'un mode commun.
+
+**Risque transitoire — le matériel se trompe pendant le run.** Une 4090 n'a
+**pas d'ECC** : ni sur la VRAM, ni sur les registres, ni sur la mémoire
+partagée. Le calcul dure ~205 heures-GPU. Et surtout, nos auto-tests ne
+couvrent qu'une partie des positions de bits :
+
+| positions | part | qui les protège |
+|---|---|---|
+| bits 0–15 | 10,0 % | auto-test par tranche (divisibilité par 2¹⁶) |
+| bits 16–62 | 29,4 % | auto-test du total (divisibilité par 2⁶³) |
+| **bits 63–139** | **48,1 %** | **rien** |
+| bits 140–159 | 12,5 % | l'estimateur de Knuth à ±2 % |
+
+Le calcul : une inversion en position *b* dans une somme partielle décale L de
+2^{b−63} ; rapporté à L ≈ 2^{82,25}, l'écart relatif vaut 2^{b−145,25}, et il ne
+dépasse les 2 % de l'estimateur qu'à partir de b = 140. **Une inversion d'un bit
+au hasard passe donc inaperçue une fois sur deux.**
+
+Reste à savoir combien de telles inversions attendre. Là, honnêtement, je n'ai
+pas de chiffre défendable : les taux d'erreurs douces publiés pour de la mémoire
+GPU sans ECC varient de plusieurs ordres de grandeur selon l'étude, l'altitude
+et le silicium. Mon estimation de praticien, à donner pour ce qu'elle vaut :
+**quelques pour cent** de probabilité qu'au moins une corruption non détectée
+entache un run de 205 heures-GPU. C'est une opinion, pas une mesure.
+
+**Conclusion opérationnelle : c'est le matériel qu'il faut assurer, pas
+l'algorithme.** Et l'assurance est bon marché — le coût total ne dépend que des
+heures-GPU (§7.3) :
+
+| stratégie | surcoût | ce que ça attrape |
+|---|---|---|
+| rien | 0 $ | 52 % des inversions isolées |
+| rejouer 2 % des tâches (`SAMPLE`) | ~0,50 $ | + 2 % du reste |
+| rejouer 10 % | ~2,30 $ | + 10 % du reste |
+| **run entier dupliqué, découpage différent** | **~23 $** | **tout**, y compris une erreur systématique liée au découpage |
+
+Pour un calcul de cette nature, la duplication complète est le bon choix : elle
+double une facture de 23 $ et rend le résultat défendable. Deux découpages
+différents (par exemple T = 4096 et T = 8192) ne donnent pas les mêmes sommes
+partielles ; on compare alors les **totaux**, ce qui teste en prime la logique
+de découpage et d'agrégation.
 
 ### 3.4 Checklist
 
@@ -255,7 +317,7 @@ corollaire direct du 4ⁿ du §5.
 | 10 | les valeurs connues sont reproduites | **M** | n = 11..24, binaire courant |
 | 11 | une référence CPU concorde | **M** | `./oe_ref 12`, `./oe_ref2 12` |
 | 12 | recoupement entre versions indépendantes | **M** | v3/v4/v5 identiques au bit près sur n=31 |
-| 13 | **les chemins de code propres à n=27, 28, 31** | **M** | `./slice_ref` contre le noyau : 28 tranches identiques au bit près, dont 5 à n=31, 1 à n=28, 2 à n=27 (§3.2c). *C'était le trou n° 13 de la version précédente ; il est fermé au niveau de la tranche, pas du total.* |
+| 13 | **les chemins de code propres à n=27, 28, 31** | **M** | `./slice_ref` contre le noyau, au bit près : 9 tranches à n=31 dont le **shard dégénéré `vhi=0`** (87,9 % de survivants, 1,37·10¹¹ points) et le **milieu exact** de la plage, plus n=27 et n=28 (§3.2c). *C'était le trou n° 13 ; il est fermé au niveau de la tranche, pas du total.* |
 | 14 | une tranche est déterministe (rejeu bit à bit) | **M** | `audit.sh` §5 |
 | 15 | **un total complet à n=27 ou 28** | **✗** | ~2,6 h + ~10,6 h — le trou le moins cher qui reste |
 
@@ -266,10 +328,10 @@ corollaire direct du 4ⁿ du §5.
 | 16 | tranche manquante ou dupliquée | **M** | `audit.sh` §1 |
 | 17 | corruption dans les bits bas d'une tranche | **M** | auto-test par tranche, sur la machine productrice |
 | 18 | corruption dans les bits 16 à 62 | **M** | auto-test du total, `audit.sh` §2 |
-| 19 | corruption dans les bits ≥ 63 d'une tranche | **M (sondage)** | `audit.sh` §5 rejoue un échantillon ; probabilité de détection = fraction rejouée |
+| 19 | corruption dans les bits ≥ 63 d'une tranche | **M (sondage)** | 48 % des positions ne sont protégées par **aucun** test (§3.3bis) ; `audit.sh` §5 rejoue un échantillon, détection = fraction rejouée. **Le seul remède complet est de dupliquer le run (~23 $).** |
 | 20 | toutes les tâches ont tourné le **même** code | **M** | `audit.sh` §3 : inventaire des empreintes sha256 portées par chaque ligne |
 | 21 | erreur structurelle (symétrie, terme diagonal) | **M** | `./estimate 31` → 5,74·10²⁴ ± 2 % ; toute erreur de ce type décale d'un facteur ≥ 2 |
-| 22 | **recalcul complet indépendant** | **✗** | la seule chose qui mérite le nom de preuve ; ~205 h GPU sur une 4090 |
+| 22 | **recalcul complet indépendant** | **✗** | la seule chose qui mérite le nom de preuve ; ~205 h GPU sur une 4090, soit ~23 $ de plus. Recommandé, avec un **découpage différent** (T=4096 puis T=8192) pour tester aussi l'agrégation |
 
 ### 3.5 Refaire la vérification soi-même
 
