@@ -1863,6 +1863,12 @@ Les briques de plus bas niveau, si besoin :
 
 * `tensorcheck.cu` — débit mesuré des tensor cores INT8 contre le motif
   `xor`+masque+`popc` du drain : c'est ce banc qui ferme la piste GEMM (§5.2)
+* `proof/Langford.lean` — **preuve Lean 4** que l'énumération du noyau couvre
+  chaque point exactement une fois : involutivité de `f` et de σ, unicité du
+  translaté épinglé de Klein (facteur 4 exact), trichotomie de la réflexion
+  (poids 2 hors diagonale, 1 dessus). Sans mathlib, sans `sorry` ; `#print
+  axioms` ne rend que `propext` et `Quot.sound`. Portée et limites dans
+  `proof/README.md`
 * `oe_check.c` — décomposition de parité, vérifiée jusqu'à n=31
 * `check_decomp.c` — décomposition v7 des écarts **impairs** en
   `Base(o,e_hi) + delta(bloc,e_lo) + termes croisés`, vérifiée terme à terme et
