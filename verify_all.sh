@@ -36,7 +36,10 @@ SL="11:0 12:3 15:1 16:7 19:1 20:63 23:32767 24:65535 27:524287 28:1048575 31:838
 [ "$MODE" = full ] && SL="$SL 23:30000 24:60000 31:8385000 31:8380000"
 chk ./check_slices.sh $SL
 
-say "5. valeurs connues, calculees de bout en bout par le GPU"
+say "5. l'echelle complete n = 1 a 24"
+chk ./ladder.sh
+
+say "5bis. valeurs connues, calculees de bout en bout par le GPU"
 NS="11 12 15 16 19 20"; [ "$MODE" = full ] && NS="$NS 23 24"
 for n in $NS; do
   got=$(./langford6 -n $n 2>/dev/null | sed -n 's/.*L(2,[0-9]*) *= *//p')

@@ -289,6 +289,7 @@ diverge — **à lancer avant toute campagne**.
 Contrôles individuels :
 
 ```sh
+./ladder.sh                     # l'echelle 1..24, n par n, avec sa couverture
 ./verify 16                     # Godfrey vs force brute, n = 1..16
 ./cover_check 9 31 12           # couverture exacte, exhaustive, jusqu'a n=31
 ./slice_ref 31 8388607          # une tranche recalculee depuis la definition
@@ -1968,6 +1969,8 @@ Les briques de plus bas niveau, si besoin :
   `xor`+masque+`popc` du drain : c'est ce banc qui ferme la piste GEMM (§5.2)
 * `verify_all.sh` — **rejoue toute la chaîne de validation** en une commande
   (§3.5) ; sort non nul si quoi que ce soit diverge
+* `ladder.sh` — l'échelle **n = 1 à 24**, n par n : valeur attendue, mode de
+  couverture, et vérification (`GPU=0` pour la partie CPU seule)
 * `verify.c` — identité de Godfrey contre une **force brute** indépendante,
   n = 1..16, et la condition de validité de la réduction ×4 (§3.2a)
 * `cover_check.c` — le **pont preuve ↔ code** : la couverture exacte vérifiée
