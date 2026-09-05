@@ -429,20 +429,45 @@ Toutes les lignes donnent le coût de **n=31 sur la même RTX 4070**, ce qui ren
 les gains comparables entre eux. Le facteur de chaque ligne est son gain sur la
 ligne précédente ; le produit de la colonne vaut le total.
 
-| # | ce qui change | n=31 | gain | d'où vient le facteur |
-|---|---|---|---|---|
-| | **Godfrey nu (2002)** — aucune symétrie, arithmétique modulaire + CRT | ≈ 4 500 j | — | |
-| 1 | **symétrie d'ordre 4** — épingler 2 coordonnées (Assarpour, Bar-Noy & Liu, 2015) → **l'état de l'art publié** | **≈ 1 100 j** | **×4,1** | comptage de points, 2⁶² → 2⁶⁰ |
-| 2 | **bignum 160 bits tronqué** au lieu de modulaire + CRT (v1/v2) | 360 j | ×3,06 | **modèle** arithmétique (§6) |
-| 3 | **symétrie d'ordre 8** — la réflexion en plus du groupe de Klein (v3) | 180,1 j | ×2,00 | comptage de points, 2⁶⁰ → 2⁵⁹ |
-| 4 | **ne pas calculer les produits nuls** — 87 % le sont ; compaction des survivants en file par warp (v4, §4.1) | 101,7 j | ×1,77 | mesure appariée |
-| 5 | **demi-état + déroulage par 8** — seuls les écarts pairs décident de la survie (v5, §4.2) | 75,0 j | ×1,36 | mesure appariée |
-| 6 | **coordonnées de parité + bitmaps de survie** — la boucle chaude disparaît, le test tombe sous une instruction par point (v6, §4.3) | 34,0 j | ×2,21 | mesure appariée |
-| 7 | **chaînes de retenue PTX + extraction `prmt`** — ce que le C ne sait pas dire (v6.1, §4.9) | 30,9 j | ×1,10 | mesure appariée |
-| 8 | **écarts impairs tabulés + chemin rapide du produit + `LDS.64`** (v7, §4.10) | **25,8 j** | **×1,20** | mesure appariée |
+| # | ce qui change | n=31 | gain | origine | facteur établi par |
+|---|---|---|---|---|---|
+| | **Godfrey nu (2002)** — aucune symétrie, arithmétique modulaire + CRT | ≈ 4 500 j | — | **littérature, Langford** — Godfrey 2002 | |
+| 1 | **symétrie d'ordre 4** — épingler 2 coordonnées → **l'état de l'art publié** | **≈ 1 100 j** | **×4,1** | **littérature, Langford** — Assarpour, Bar-Noy & Liu 2015 §4 | comptage de points, 2⁶² → 2⁶⁰ |
+| 2 | **bignum 160 bits tronqué** au lieu de modulaire + CRT (v1/v2) | 360 j | ×3,06 | **hors Langford** — arithmétique tronquée en complément à deux, Knuth *TAOCP* II §4.3.1 ; le choix et sa mesure sont à moi | **modèle** arithmétique (§6) |
+| 3 | **symétrie d'ordre 8** — la réflexion en plus du groupe de Klein (v3) | 180,1 j | ×2,00 | **mixte** — les symétries sont listées par Assarpour *et al.*, qui n'en tirent qu'un facteur 4 ; le facteur 8 complet est à moi | comptage de points, 2⁶⁰ → 2⁵⁹ |
+| 4 | **ne pas calculer les produits nuls** — 87 % le sont ; compaction en file par warp (v4, §4.1) | 101,7 j | ×1,77 | **mixte** — la compaction par warp est une technique NVIDIA classique ; l'appliquer ici lève une objection SIMT qui faisait rejeter l'idée (§6.bis 5) | mesure appariée |
+| 5 | **demi-état + déroulage par 8** — seuls les écarts pairs décident de la survie (v5, §4.2) | 75,0 j | ×1,36 | **à moi** — conséquence d'ingénierie de A_i ≡ i (mod 2), qui est classique | mesure appariée |
+| 6 | **coordonnées de parité + bitmaps de survie** — la boucle chaude disparaît (v6, §4.3) | 34,0 j | ×2,21 | **à moi** — la décomposition deux rangées est connue pour l'argument n ≡ 0,3 (mod 4), l'exploiter comme *séparation de variables* ne l'est pas (§6.bis 1) | mesure appariée |
+| 7 | **chaînes de retenue PTX + extraction `prmt`** (v6.1, §4.9) | 30,9 j | ×1,10 | **hors Langford** — idiomes standard (CGBN, ISA PTX) ; l'apport est de les avoir mesurés ici et vérifié que ptxas ne les trouve pas | mesure appariée |
+| 8 | **écarts impairs tabulés + chemin rapide du produit + `LDS.64`** (v7, §4.10) | **25,8 j** | **×1,20** | **à moi** — la tabulation est une technique banale ; l'axe de décomposition (`threadIdx` ne pilote que 8 bits de `o`, via `__brev`) ne l'est pas | mesure appariée |
 
 > **De l'état de l'art publié (2015) à la v7, sur le même matériel : ×42,6.**
 > Depuis Godfrey nu : ×174. Depuis mon point de départ mesurable (v3) : ×6,99.
+
+**Lecture de la colonne « origine ».** *Littérature, Langford* : publié, et déjà
+appliqué à ce problème — je ne fais que l'implémenter. *Hors Langford* :
+technique connue ailleurs (arithmétique multi-précision, idiomes PTX), dont
+l'apport ici est le choix et la mesure, pas l'invention. *Mixte* : le mécanisme
+existe, son application à ce problème est à moi. *À moi* : je ne l'ai vue nulle
+part, ce qui ne prouve pas qu'elle n'y est pas. Le §6.bis détaille chaque
+attribution, y compris ce que je considère comme du folklore.
+
+**Ce que ça donne comme partage.** Le ×4,1 qui mène de Godfrey nu à l'état de
+l'art publié vient entièrement de la littérature Langford : je ne fais que
+l'implémenter. Tout ce qui suit — le ×42,6 — a été **ajouté ici**, ce qui n'est
+pas la même chose qu'inventé ici : les lignes 2, 3, 4 et 7 reposent sur des
+techniques connues ailleurs, elles n'avaient simplement pas été appliquées à ce
+problème. En décomposant :
+
+| | facteur |
+|---|---|
+| une seule idée vraiment structurelle — la séparation de variables du §2.2 (ligne 6) | ×2,21 |
+| tout le reste : arithmétique, symétrie complète, compaction, PTX, tabulation (lignes 2, 3, 4, 5, 7, 8) | ×19,4 |
+| **total ajouté ici** | **×42,6** |
+
+Autrement dit, **l'essentiel du gain est de l'ingénierie**, pas une idée. C'est
+cohérent avec le §6 : l'exposant n'a pas bougé depuis 2002, et ce dépôt ne
+prétend pas le contraire.
 
 Trois précautions sur ce tableau.
 
@@ -1663,7 +1688,18 @@ constantes et des résultats négatifs.
 5. **Saut des produits nuls par compaction warp** (§4.1) : l'observation que
    87 % des produits sont nuls est ancienne, mais elle était rejetée comme
    inexploitable en SIMT ; la compaction la rend exploitable.
-6. **Le tensor core ne bat pas le popcount sur une corrélation ±1** (§5.2).
+6. **Décomposition des écarts impairs sur l'axe `threadIdx`** (§4.10). Les 15
+   écarts impairs sont bilinéaires en (o,e) : ils ne se séparent pas comme les
+   pairs, et c'est pour cela que le drain les recalculait par 22 popcounts et
+   par survivant. Ils se séparent quand même, mais sur un axe qui n'a rien à
+   voir avec la parité : parce que `o` est construit par `__brev`, `threadIdx`
+   ne pilote que **huit** bits de `o`, et tout le reste est constant sur le
+   bloc. En classant les couples (a, c) d'un écart selon que *a* tombe dans
+   cette fenêtre et *c* dans `e_lo`, il ne reste que trois termes
+   indissociables à n=31 : les écarts impairs deviennent une somme de deux
+   tables, exactement comme les pairs. La tabulation est une technique banale ;
+   l'axe de décomposition, je ne l'ai vu nulle part. **+19,7 % mesuré.**
+7. **Le tensor core ne bat pas le popcount sur une corrélation ±1** (§5.2).
    Le réflexe « c'est bilinéaire, donc c'est un GEMM, donc ça va vite » est
    faux ici, et pour une raison qui se mesure : `popc` sur un XOR 32 bits *est*
    un produit scalaire binaire de longueur 32, si bien que l'INT8 ne mène que
