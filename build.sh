@@ -32,5 +32,8 @@ done
 [ -f toeplitz.c ] && gcc -O2 -o toeplitz toeplitz.c 2>/dev/null || true
 [ -f partial.c ] && gcc -O2 -o partial partial.c 2>/dev/null || true
 [ -f find_langford.c ] && gcc -O2 -o find_langford find_langford.c 2>/dev/null || true
-[ -f estimate.c ] && gcc -O2 -fopenmp -o estimate estimate.c 2>/dev/null || true
+# -lm : estimate.c appelle log2().  Sans lui l'edition de liens echoue, et le
+# `2>/dev/null || true` avalait l'erreur -- le binaire n'a jamais ete construit
+# sans que rien ne le signale.
+[ -f estimate.c ] && gcc -O2 -fopenmp -o estimate estimate.c -lm 2>/dev/null || true
 echo ok
