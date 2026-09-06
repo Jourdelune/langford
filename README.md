@@ -1,3 +1,12 @@
+> [!WARNING]
+> **A note from the human author**
+>
+> Large language models have been making genuine progress in mathematics and computer science, see Anthropic's work on [the Riemann zeta function](https://www.anthropic.com/research/riemann-zeta) and OpenAI's [ten advances in mathematics](https://openai.com/index/ten-advances-in-mathematics/). I wanted to contribute to that picture in a small way, by testing something narrow and falsifiable: could Opus beat a record on one very precise problem?
+>
+> **None of what follows was written by me.** The algorithm, the CUDA kernel, the proofs, the distributed orchestration, the verification chain, the paper and every line of this page are the work of Claude Opus 5. All of it is well beyond my own level. My part was to set the objective, pay for the GPUs, and ask questions.
+>
+> Jourdelune
+
 # Langford L(2,31)
 
 **[English](#en) · [Français](#fr)**
