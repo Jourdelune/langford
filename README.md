@@ -1,6 +1,6 @@
 # Langford L(2,31)
 
-**[Français](#français) · [English](#english)**
+**[Français](#fr) · [English](#en)**
 
 ```
 L(2,31) = 5 894 683 902 597 484 486 903 808
@@ -12,14 +12,18 @@ Aucune valeur de L(2,31) n'avait été publiée auparavant.
 
 > **Ce dépôt est entièrement l'œuvre d'une IA.** Les 40 commits, du premier au
 > dernier, ont été écrits par **Claude Opus 5** — algorithme, noyau CUDA,
-> orchestration, vérification et cette page. Détail au §[Travail réalisé par
-> IA](#travail-réalisé-par-ia).
+> orchestration, vérification et cette page. Détail : [Travail réalisé par IA](#ia).
+
+**[📄 Le papier (PDF, 7 pages)](paper/langford31.pdf)** — méthode, optimisations,
+vérification et résultat, illustré. [Source LaTeX](paper/langford31.tex).
 
 Le journal de bord complet — quatorze pistes fermées, les mesures ratées, les
 preuves de non-existence — est dans **[TRACE.md](TRACE.md)** (2 300 lignes).
 Cette page en est le résumé.
 
 ---
+
+<a id="fr"></a>
 
 # Français
 
@@ -43,6 +47,37 @@ valeurs connues est [OEIS A014552](https://oeis.org/A014552) ; elle s'arrêtait
 Le calcul a été découpé en 8 192 tranches plus une tâche « diagonale »,
 réparties sur 32 RTX 4070 Super louées et une RTX 4070 locale.
 
+### Pourquoi `V(n) = 2·L(2,n)` ?
+
+Parce que les deux quantités ne comptent pas la même chose. La somme de Godfrey
+produit naturellement **`V(n)`, le nombre d'arrangements** — les suites écrites,
+de gauche à droite. Or `L(2,n)`, la valeur d'OEIS A014552, compte les
+appariements **à renversement près** : une suite et son miroir sont le même
+objet.
+
+Le passage de l'un à l'autre est une division exacte par 2, et ce n'est pas une
+convention commode — c'est un théorème : **aucun appariement de Langford n'est
+son propre miroir.** Si l'arrangement était invariant par la réflexion
+p ↦ 2n+1−p, la paire portant la valeur *k*, aux positions *i* et *i+k+1*,
+devrait s'envoyer sur elle-même :
+
+```math
+\{\, 2n-i-k,\; 2n+1-i \,\} = \{\, i,\; i+k+1 \,\}
+\qquad \Longrightarrow \qquad 2i = 2n-k
+```
+
+Pour *k* **impair**, cette équation n'a aucune solution entière. Comme les
+valeurs vont de 1 à *n*, il y a toujours un *k* impair : la réflexion est une
+involution **sans point fixe**, elle apparie donc les arrangements exactement
+deux à deux, et `V(n)` est pair.
+
+Le programme s'en sert comme test. Il exige la divisibilité du total par
+`2^(2n+1)` et non `2^(2n)` — le bit supplémentaire est précisément celui-là. Un
+`V` impair, que le décalage final tronquerait en silence, devient ainsi une
+**erreur** plutôt qu'un résultat faux et crédible.
+
+<a id="verifier"></a>
+
 ## Vérifier le résultat soi-même
 
 Un nombre sans moyen de le contredire ne vaut rien. Tout ce qui suit est fourni
@@ -56,7 +91,7 @@ Il est **versionné dans ce dépôt**, à la fois déplié et en archive :
 |---|---|
 | dossier navigable | [`preuve_n31_20260906T053939Z/`](preuve_n31_20260906T053939Z/) |
 | archive (944 Ko) | [`preuve_n31_20260906T053939Z.tar.gz`](preuve_n31_20260906T053939Z.tar.gz) |
-| release GitHub | [`n31-result`](../../releases/tag/n31-result) |
+| release GitHub | [`n31-result`](https://github.com/Jourdelune/langford/releases/tag/n31-result) |
 
 ```
 sha256  ef66b1a3d699c7086634f31e02ada0636fcee7ea3a8039e7a59135e648e5806a
@@ -171,8 +206,10 @@ Une suite de Langford est un couplage parfait des 2n positions dont le
 multi-ensemble des écarts vaut exactement {2, 3, …, n+1}. Godfrey encode ça dans
 un polynôme :
 
-```
-F(n,X) = ∏_{i=2}^{n+1} A_i(X)      avec   A_i(X) = Σ_{k=1}^{2n-i} x_k · x_{k+i}
+```math
+F(n,X) \;=\; \prod_{i=2}^{n+1} A_i(X),
+\qquad
+A_i(X) \;=\; \sum_{k=1}^{2n-i} x_k\,x_{k+i}
 ```
 
 `A_i` énumère toutes les façons de placer une paire d'écart *i*. Le nombre de
@@ -183,13 +220,14 @@ n'est pas x₁x₂…x_{2n} possède une variable d'exposant pair**. En substitu
 x_k = ±1 et en sommant sur les 2^{2n} assignations, tous ces monômes s'annulent
 et il ne reste que celui qu'on cherche :
 
-```
-V(n) = 2·L(2,n) = 2^{-2n} · Σ_{X ∈ {-1,1}^{2n}} (∏_k x_k) · F(n,X)
+```math
+V(n) \;=\; 2\,L(2,n) \;=\; 2^{-2n}
+\sum_{X \in \{-1,1\}^{2n}} \Big( \prod_{k=1}^{2n} x_k \Big)\, F(n,X)
 ```
 
 Un problème de comptage combinatoire devient **une somme de 4ⁿ termes entiers**.
 Chaque terme est indépendant : c'est parfait pour un GPU. Coût Θ(4ⁿ), inchangé
-depuis 2002 — et le §5 de [TRACE.md](TRACE.md) explique, en quatorze voies
+depuis 2002 — et [le §5 de TRACE.md](TRACE.md#s5) explique, en quatorze voies
 fermées, pourquoi personne ne sait faire mieux.
 
 ### 2. Le groupe de symétries d'ordre 8
@@ -215,9 +253,13 @@ là où la réponse est 0. Le programme **refuse** donc ces n.
 Séparons les positions **impaires** (rangée `o`, n cases) des **paires**
 (rangée `e`). Un calcul d'indices donne, pour tout n :
 
-```
-écart PAIR   i = 2m   :  A_i = P_m(o) + Q_m(e)                    ← rangées SÉPARÉES
-écart IMPAIR i = 2m+1 :  A_i = Σ_j O_j·E_{j+m} + Σ_j E_j·O_{j+m+1}  ← bilinéaire
+```math
+\begin{aligned}
+\text{écart PAIR } i = 2m &: \quad A_i = P_m(o) + Q_m(e)
+      &&\text{— rangées séparées} \\[4pt]
+\text{écart IMPAIR } i = 2m+1 &: \quad A_i = \sum_j O_j E_{j+m} + \sum_j E_j O_{j+m+1}
+      &&\text{— bilinéaire}
+\end{aligned}
 ```
 
 où P_m et Q_m sont les autocorrélations de rangée au lag m. Vérifié exactement
@@ -257,7 +299,7 @@ les gains comparables. Chaque facteur est le gain sur la ligne précédente.
 | # | ce qui change | n=31 | gain | origine |
 |---|---|---|---|---|
 | | **Godfrey nu (2002)** — pas de symétrie, modulaire + CRT | ≈ 4 500 j | — | littérature |
-| 1 | **symétrie d'ordre 4** → l'état de l'art publié (2015) | ≈ 1 100 j | ×4,1 | littérature (Assarpour *et al.* §4) |
+| 1 | **symétrie d'ordre 4** → l'état de l'art publié (2015) | ≈ 1 100 j | ×4,1 | littérature ([Assarpour *et al.* §4](https://arxiv.org/abs/1507.00315)) |
 | 2 | **bignum 160 bits tronqué** au lieu de modulaire + CRT | 360 j | ×3,06 | hors Langford (Knuth TAOCP II §4.3.1) |
 | 3 | **symétrie d'ordre 8** — la réflexion en plus | 180,1 j | ×2,00 | mixte |
 | 4 | **saut des produits nuls** + compaction par warp | 101,7 j | ×1,77 | mixte |
@@ -346,7 +388,7 @@ projection ×4.
 Les deux premières lignes sont mesurées avec le binaire qui a produit le
 résultat, sur le même échantillon de 96 `vhi` à graine fixe. Les deux dernières
 ne le sont pas : leurs absolus datent d'un build antérieur à la v7, et seul le
-**rapport** entre cartes est réputé stable (§7.1 de [TRACE.md](TRACE.md)). Elles
+**rapport** entre cartes est réputé stable ([§7.1 de TRACE.md](TRACE.md#s71)). Elles
 sont donc obtenues en appliquant ce rapport à la mesure 4070 actuelle, et
 devraient être revérifiées avant d'engager une location.
 
@@ -383,8 +425,23 @@ tient dans un `uint32_t`** : 32 cases par rangée, 31 bits libres après épingl
 Ça passe, mais il ne reste que ~8,7 bits. Pour n=35 (le suivant ≡ 3 mod 4),
 l'accumulateur 160 bits serait insuffisant.
 
+### Ce record ne devrait pas tenir longtemps
+
+Et c'est sans doute la chose la plus utile que ce dépôt puisse dire.
+
+n=31 a coûté **50 $ et 15,7 heures**. n=32 en demande **~2 000 h·GPU et ~190 $** —
+moins de trois jours sur la même flotte. Ce n'est plus un calcul institutionnel :
+c'est à la portée d'un particulier avec une carte bancaire, et le logiciel pour
+le faire est publié ici, avec sa chaîne de vérification.
+
+Le facteur ×42 sur l'état de l'art n'a pas déplacé l'exposant, mais il a déplacé
+le **seuil d'accessibilité**. Ce qui exigeait un cluster en 2015 tient
+aujourd'hui sur une facture de restaurant. Nous nous attendons donc à ce que
+L(2,31) soit dépassé rapidement — et le dépôt est organisé pour que ce soit
+facile plutôt que méritoire.
+
 Le vrai mur reste le 4ⁿ : chaque n de plus coûte 4×, et n=35 coûterait 256× n=31,
-soit ~127 000 h·GPU et ~12 000 $. Le §5 de [TRACE.md](TRACE.md) argumente que
+soit ~127 000 h·GPU et ~12 000 $. [Le §5 de TRACE.md](TRACE.md#s5) argumente que
 casser cet exposant demanderait un mécanisme inconnu.
 
 ## Coût de l'expérience
@@ -413,6 +470,8 @@ et n'exécutait aucun noyau sm_89. Le rabais était le symptôme. L'orchestrateu
 refuse désormais ces hôtes automatiquement et n'accepte une machine qu'après lui
 avoir fait calculer L(2,12) = 108144.
 
+<a id="ia"></a>
+
 ## Travail réalisé par IA
 
 **L'intégralité de ce dépôt a été produite par Claude Opus 5**, d'Anthropic,
@@ -430,10 +489,12 @@ Le rôle humain a été de fixer les objectifs, de fournir l'accès au matériel
 au compte de location, et de trancher les arbitrages de dépense.
 
 Ce qui n'a **pas** été délégué à l'IA : la vérification par des tiers. C'est
-précisément pourquoi le §[Vérifier le résultat soi-même](#vérifier-le-résultat-soi-même)
+précisément pourquoi la section [Vérifier le résultat soi-même](#verifier)
 existe et pourquoi chaque somme partielle porte sa provenance. Un résultat
 produit par une IA n'a pas moins besoin d'être recalculé par quelqu'un
 d'autre — il en a davantage besoin.
+
+<a id="refs"></a>
 
 ## Références
 
@@ -446,7 +507,7 @@ d'autre — il en a davantage besoin.
 
 **La méthode de comptage**
 
-- M. Godfrey, méthode algébrique (2002). Pas de publication formelle ; décrite dans Assarpour–Bar-Noy–Liu §3 et dans D. E. Knuth, *TAOCP* vol. 4, pré-fascicule 5B, section « Langford pairs ».
+- M. Godfrey, méthode algébrique (2002). Pas de publication formelle ; décrite dans [Assarpour–Bar-Noy–Liu §3](https://arxiv.org/abs/1507.00315) et dans D. E. Knuth, *TAOCP* vol. 4, pré-fascicule 5B, section « Langford pairs ».
 - A. Assarpour, A. Bar-Noy, O. Liu, *Counting Skolem Sequences*, [arXiv:1507.00315](https://arxiv.org/abs/1507.00315) (2015, rév. 2017). — L(27) et L(28), implémentation CUDA de Godfrey ; **c'est l'état de l'art auquel ce dépôt se compare**
 - M. Krajecki, C. Jaillet, A. Bui *et al.*, calculs distribués CONFIIT (2004–2005) — valeurs jusqu'à n=24.
 - D. E. Knuth, *Estimating the efficiency of backtrack programs*, Math. Comp. **29** (1975), 121–136. — l'estimateur non biaisé de `estimate.c`
@@ -481,9 +542,12 @@ d'autre — il en a davantage besoin.
 | `check_refs.sh` | croisement des deux algorithmes |
 | `verify_all.sh` | la chaîne complète sur les petits n |
 | `estimate.c` | estimateur de Knuth, repère indépendant |
+| **[paper/langford31.pdf](paper/langford31.pdf)** | **le papier, 7 pages illustrées** (`make` dans `paper/` le reconstruit) |
 | **[TRACE.md](TRACE.md)** | **le journal de bord complet, 2 300 lignes** |
 
 ---
+
+<a id="en"></a>
 
 # English
 
@@ -507,6 +571,34 @@ n=28, computed in 2015. **n=31 was the open record.**
 The computation was split into 8,192 slices plus one "diagonal" task, spread
 across 32 rented RTX 4070 Supers and one local RTX 4070.
 
+### Why is `V(n) = 2·L(2,n)`?
+
+Because the two quantities count different things. Godfrey's sum naturally
+produces **`V(n)`, the number of arrangements** — sequences as written, left to
+right. But `L(2,n)`, the value in OEIS A014552, counts pairings **up to
+reversal**: a sequence and its mirror image are the same object.
+
+Going from one to the other is an exact division by 2, and that is not a
+convenient convention — it is a theorem: **no Langford pairing is its own mirror
+image.** Were an arrangement invariant under the reflection p ↦ 2n+1−p, the pair
+carrying value *k*, at positions *i* and *i+k+1*, would have to map to itself:
+
+```math
+\{\, 2n-i-k,\; 2n+1-i \,\} = \{\, i,\; i+k+1 \,\}
+\qquad \Longrightarrow \qquad 2i = 2n-k
+```
+
+For **odd** *k* that equation has no integer solution. Since the values run from
+1 to *n*, an odd *k* always exists: the reflection is a **fixed-point-free**
+involution, so it pairs arrangements up exactly two by two, and `V(n)` is even.
+
+The program uses this as a test. It requires the total to be divisible by
+`2^(2n+1)` rather than `2^(2n)` — that extra bit is precisely this one. An odd
+`V`, which the final shift would silently truncate, therefore becomes an
+**error** rather than a wrong but plausible result.
+
+<a id="verify"></a>
+
 ## Verifying the result yourself
 
 A number with no way to contradict it is worthless. Everything below is provided
@@ -520,7 +612,7 @@ It is **committed to this repository**, both unpacked and as an archive:
 |---|---|
 | browsable directory | [`preuve_n31_20260906T053939Z/`](preuve_n31_20260906T053939Z/) |
 | archive (944 KB) | [`preuve_n31_20260906T053939Z.tar.gz`](preuve_n31_20260906T053939Z.tar.gz) |
-| GitHub release | [`n31-result`](../../releases/tag/n31-result) |
+| GitHub release | [`n31-result`](https://github.com/Jourdelune/langford/releases/tag/n31-result) |
 
 ```
 sha256  ef66b1a3d699c7086634f31e02ada0636fcee7ea3a8039e7a59135e648e5806a
@@ -631,8 +723,10 @@ trailing digits.
 A Langford pairing is a perfect matching of the 2n positions whose multiset of
 gaps is exactly {2, 3, …, n+1}. Godfrey encodes this in a polynomial:
 
-```
-F(n,X) = ∏_{i=2}^{n+1} A_i(X)      where   A_i(X) = Σ_{k=1}^{2n-i} x_k · x_{k+i}
+```math
+F(n,X) \;=\; \prod_{i=2}^{n+1} A_i(X),
+\qquad
+A_i(X) \;=\; \sum_{k=1}^{2n-i} x_k\,x_{k+i}
 ```
 
 `A_i` enumerates every way to place a pair with gap *i*. The number of pairings
@@ -643,13 +737,13 @@ other than x₁x₂…x_{2n} has some variable at an even exponent**. Substituti
 x_k = ±1 and summing over all 2^{2n} assignments annihilates all of them,
 leaving only the one we want:
 
-```
-V(n) = 2·L(2,n) = 2^{-2n} · Σ_{X ∈ {-1,1}^{2n}} (∏_k x_k) · F(n,X)
+```math
+V(n) \;=\; 2\,L(2,n) \;=\; 2^{-2n}
+\sum_{X \in \{-1,1\}^{2n}} \Big( \prod_{k=1}^{2n} x_k \Big)\, F(n,X)
 ```
 
 A combinatorial counting problem becomes **a sum of 4ⁿ integer terms**. Each
-term is independent — ideal for a GPU. Cost Θ(4ⁿ), unchanged since 2002; §5 of
-[TRACE.md](TRACE.md) explains, across fourteen closed avenues, why nobody knows
+term is independent — ideal for a GPU. Cost Θ(4ⁿ), unchanged since 2002; [§5 of TRACE.md](TRACE.md#s5) explains, across fourteen closed avenues, why nobody knows
 how to do better.
 
 ### 2. The order-8 symmetry group
@@ -675,9 +769,13 @@ the answer is 0. The program therefore **refuses** those n.
 Separate the **odd** positions (row `o`, n cells) from the **even** ones (row
 `e`). An index computation gives, for every n:
 
-```
-EVEN gap i = 2m   :  A_i = P_m(o) + Q_m(e)                     ← rows SEPARATED
-ODD  gap i = 2m+1 :  A_i = Σ_j O_j·E_{j+m} + Σ_j E_j·O_{j+m+1}   ← bilinear
+```math
+\begin{aligned}
+\text{EVEN gap } i = 2m &: \quad A_i = P_m(o) + Q_m(e)
+      &&\text{— rows separated} \\[4pt]
+\text{ODD gap } i = 2m+1 &: \quad A_i = \sum_j O_j E_{j+m} + \sum_j E_j O_{j+m+1}
+      &&\text{— bilinear}
+\end{aligned}
 ```
 
 where P_m and Q_m are the row autocorrelations at lag m. Verified exactly over
@@ -715,7 +813,7 @@ comparable. Each factor is the gain over the previous row.
 | # | what changes | n=31 | gain | origin |
 |---|---|---|---|---|
 | | **Bare Godfrey (2002)** — no symmetry, modular + CRT | ≈ 4,500 d | — | literature |
-| 1 | **order-4 symmetry** → the published state of the art (2015) | ≈ 1,100 d | ×4.1 | literature (Assarpour *et al.* §4) |
+| 1 | **order-4 symmetry** → the published state of the art (2015) | ≈ 1,100 d | ×4.1 | literature ([Assarpour *et al.* §4](https://arxiv.org/abs/1507.00315)) |
 | 2 | **truncated 160-bit bignum** instead of modular + CRT | 360 d | ×3.06 | outside Langford (Knuth TAOCP II §4.3.1) |
 | 3 | **order-8 symmetry** — reflection as well | 180.1 d | ×2.00 | mixed |
 | 4 | **skipping null products** + warp compaction | 101.7 d | ×1.77 | mixed |
@@ -803,8 +901,7 @@ that 0.2 % agreement that lends confidence to the ×4 projection.
 
 The first two rows are measured with the very binary that produced the result, on
 the same fixed-seed sample of 96 `vhi`. The last two are not: their absolute
-values predate v7, and only the card-to-card **ratio** is considered stable (§7.1
-of [TRACE.md](TRACE.md)). They are therefore obtained by applying that ratio to
+values predate v7, and only the card-to-card **ratio** is considered stable ([§7.1 of TRACE.md](TRACE.md#s71)). They are therefore obtained by applying that ratio to
 the current 4070 measurement, and should be re-measured before committing to a
 rental.
 
@@ -841,8 +938,22 @@ row, 31 free bits after pinning.
 It fits, but only ~8.7 bits remain. For n=35 (the next n ≡ 3 mod 4) a 160-bit
 accumulator would be insufficient.
 
+### This record should not last
+
+That is probably the most useful thing this repository can say.
+
+n=31 cost **$50 and 15.7 hours**. n=32 needs **~2,000 GPU-h and ~$190** — under
+three days on the same fleet. That is no longer an institutional computation:
+it is within reach of an individual with a credit card, and the software to do
+it is published here, verification chain included.
+
+The ×42 factor over the state of the art did not move the exponent, but it moved
+the **accessibility threshold**. What required a cluster in 2015 now fits on a
+restaurant bill. We therefore expect L(2,31) to be superseded quickly — and the
+repository is arranged to make that easy rather than meritorious.
+
 The real wall remains the 4ⁿ: each further n costs 4×, and n=35 would cost 256×
-n=31 — roughly 127,000 GPU-h and ~$12,000. §5 of [TRACE.md](TRACE.md) argues that
+n=31 — roughly 127,000 GPU-h and ~$12,000. [§5 of TRACE.md](TRACE.md#s5) argues that
 breaking that exponent would require an unknown mechanism.
 
 ## Cost of the experiment
@@ -865,6 +976,8 @@ and ran no sm_89 kernel at all. The discount was the symptom. The orchestrator
 now rejects such hosts automatically and accepts a machine only after making it
 compute L(2,12) = 108144.
 
+<a id="ai"></a>
+
 ## AI-authored work
 
 **This entire repository was produced by Claude Opus 5** (Anthropic), from the
@@ -881,14 +994,14 @@ The human role was to set the objectives, provide access to the hardware and the
 rental account, and arbitrate spending decisions.
 
 What was **not** delegated to the AI: verification by third parties. That is
-precisely why the [Verifying the result yourself](#verifying-the-result-yourself)
+precisely why the [Verifying the result yourself](#verify)
 section exists and why every partial sum carries its provenance. A result
 produced by an AI does not need independent recomputation any less than one
 produced by a human — it needs it more.
 
 ## References
 
-See the [French section](#références) above; the bibliography is identical.
+See the [French section](#refs) above; the bibliography is identical.
 
 ## Files
 
@@ -903,4 +1016,5 @@ See the [French section](#références) above; the bibliography is identical.
 | `check_refs.sh` | cross-check of the two algorithms |
 | `verify_all.sh` | full chain on small n |
 | `estimate.c` | Knuth's estimator, independent yardstick |
+| **[paper/langford31.pdf](paper/langford31.pdf)** | **the paper, 7 illustrated pages** (`make` in `paper/` rebuilds it) |
 | **[TRACE.md](TRACE.md)** | **the complete lab notebook, 2,300 lines** |

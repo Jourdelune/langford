@@ -1,0 +1,6 @@
+# artefacts de compilation LaTeX -- le .tex et le .pdf sont suivis, pas eux
+*.aux
+*.log
+*.out
+*.toc
+*.synctex.gz

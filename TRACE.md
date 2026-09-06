@@ -435,6 +435,8 @@ le fichier `parts_n31.txt` complet (8 193 lignes avec provenance), la sortie de
 correspondant. N'importe qui peut alors refaire l'addition, rejouer les
 auto-tests, et recalculer les tranches de son choix.
 
+<a id="s4"></a>
+
 ## 4. Les optimisations, dans l'ordre, avec les gains mesurés
 
 Tous les débits sont mesurés GPU au repos, moyennés sur des shards répartis
@@ -1064,6 +1066,8 @@ les popcounts depuis la v6 (§4.4).
 
 ---
 
+<a id="s5"></a>
+
 ## 5. Pistes de recherche
 
 ### 5.1 Fermées par une preuve
@@ -1495,6 +1499,8 @@ en faire quelque chose.
 
 ---
 
+<a id="s6"></a>
+
 ## 6. Est-ce un vrai progrès sur l'état de l'art ?
 
 Il faut séparer trois questions.
@@ -1728,6 +1734,8 @@ constantes et des résultats négatifs.
 ---
 
 ## 7. Budget pour n=31, et sur quelle carte
+
+<a id="s71"></a>
 
 ### 7.1  Ce qui est mesuré, et comment
 
