@@ -57,8 +57,23 @@ tensorcheck
 # caches Python (dashboard.py importe orchestrator.py)
 __pycache__/
 
-# dossiers de preuve generes par finalize.py
+# dossiers de preuve generes par finalize.py -- ignores par defaut, car un run
+# partiel ou rejoue en produit un a chaque fois.  Le dossier du resultat publie
+# fait exception : il EST la preuve, et un depot qui affirme un nombre sans
+# fournir de quoi le recalculer ne vaut rien.  L'exception nomme le dossier,
+# elle ne rouvre pas le motif.
 preuve_n*/
 preuve_n*.tar.gz
+!preuve_n31_20260906T053939Z/
+!preuve_n31_20260906T053939Z.tar.gz
+# Ces deux-la sont attrapes plus haut par `parts_n*.txt` et par la section
+# secrets (`state.db`), que la negation du dossier ne leve pas -- il faut donc
+# les nommer.  Ce sont les deux pieces qui portent la preuve : les 8193 sommes
+# partielles avec leur provenance, et l'instantane complet du run.  Ni l'un ni
+# l'autre ne contient de secret : l'instantane ne garde que noms de workers,
+# hotes proxy d'instances detruites, prix et compteurs (verifie avant
+# publication), et jamais .env ni .ssh_orch, que finalize.py ne copie pas.
+!preuve_n31_20260906T053939Z/parts_n31.txt
+!preuve_n31_20260906T053939Z/state.db
 .instances.json
 .instances.json.fait

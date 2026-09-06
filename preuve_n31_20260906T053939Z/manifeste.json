@@ -1,0 +1,349 @@
+{
+ "n": 31,
+ "T": 8192,
+ "faites": 8193,
+ "total": 8193,
+ "complet": true,
+ "genere_utc": "2026-09-06T06:27:35Z",
+ "audit_ok": true,
+ "git_commit": "4029fb6cf9056851ee6a6ef42205dd9055a40e76",
+ "git_propre": false,
+ "source_sha256": "3502d7081791581409cce40e94a1e80546b5c9fafa3e799f8c42f6235c62e2dc",
+ "workers": [
+  {
+   "name": "local",
+   "kind": "local",
+   "state": "running",
+   "ndone": 238,
+   "spv": 0.23461951239539866,
+   "price": null,
+   "dev": -1
+  },
+  {
+   "name": "s8g0",
+   "kind": "ssh",
+   "state": "running",
+   "ndone": 255,
+   "spv": 0.2179845801307315,
+   "price": 0.0945375,
+   "dev": 0
+  },
+  {
+   "name": "s8g1",
+   "kind": "ssh",
+   "state": "running",
+   "ndone": 257,
+   "spv": 0.2168070282302318,
+   "price": 0.0945375,
+   "dev": 1
+  },
+  {
+   "name": "s8g2",
+   "kind": "ssh",
+   "state": "running",
+   "ndone": 257,
+   "spv": 0.21883336945616333,
+   "price": 0.0945375,
+   "dev": 2
+  },
+  {
+   "name": "s8g3",
+   "kind": "ssh",
+   "state": "running",
+   "ndone": 252,
+   "spv": 0.22060765354396125,
+   "price": 0.0945375,
+   "dev": 3
+  },
+  {
+   "name": "s8g4",
+   "kind": "ssh",
+   "state": "running",
+   "ndone": 250,
+   "spv": 0.22844771938143313,
+   "price": 0.0945375,
+   "dev": 4
+  },
+  {
+   "name": "s8g5",
+   "kind": "ssh",
+   "state": "running",
+   "ndone": 255,
+   "spv": 0.2188905037108818,
+   "price": 0.0945375,
+   "dev": 5
+  },
+  {
+   "name": "s8g6",
+   "kind": "ssh",
+   "state": "running",
+   "ndone": 248,
+   "spv": 0.23063754864025207,
+   "price": 0.0945375,
+   "dev": 6
+  },
+  {
+   "name": "s8g7",
+   "kind": "ssh",
+   "state": "running",
+   "ndone": 253,
+   "spv": 0.21538208963458647,
+   "price": 0.0945375,
+   "dev": 7
+  },
+  {
+   "name": "m56g0",
+   "kind": "ssh",
+   "state": "running",
+   "ndone": 257,
+   "spv": 0.21515123764836597,
+   "price": 0.0945375,
+   "dev": 0
+  },
+  {
+   "name": "m56g1",
+   "kind": "ssh",
+   "state": "running",
+   "ndone": 247,
+   "spv": 0.22223952476213898,
+   "price": 0.0945375,
+   "dev": 1
+  },
+  {
+   "name": "m56g2",
+   "kind": "ssh",
+   "state": "running",
+   "ndone": 246,
+   "spv": 0.22242545165268998,
+   "price": 0.0945375,
+   "dev": 2
+  },
+  {
+   "name": "m56g3",
+   "kind": "ssh",
+   "state": "running",
+   "ndone": 249,
+   "spv": 0.22417780474170368,
+   "price": 0.0945375,
+   "dev": 3
+  },
+  {
+   "name": "m56g4",
+   "kind": "ssh",
+   "state": "running",
+   "ndone": 246,
+   "spv": 0.22718331273693765,
+   "price": 0.0945375,
+   "dev": 4
+  },
+  {
+   "name": "m56g5",
+   "kind": "ssh",
+   "state": "running",
+   "ndone": 250,
+   "spv": 0.21875765545763584,
+   "price": 0.0945375,
+   "dev": 5
+  },
+  {
+   "name": "m56g6",
+   "kind": "ssh",
+   "state": "running",
+   "ndone": 251,
+   "spv": 0.2240333450871976,
+   "price": 0.0945375,
+   "dev": 6
+  },
+  {
+   "name": "m56g7",
+   "kind": "ssh",
+   "state": "running",
+   "ndone": 252,
+   "spv": 0.2181242826270016,
+   "price": 0.0945375,
+   "dev": 7
+  },
+  {
+   "name": "m13g0",
+   "kind": "ssh",
+   "state": "running",
+   "ndone": 244,
+   "spv": 0.2226947587572508,
+   "price": 0.0945375,
+   "dev": 0
+  },
+  {
+   "name": "m13g1",
+   "kind": "ssh",
+   "state": "running",
+   "ndone": 247,
+   "spv": 0.221406429296655,
+   "price": 0.0945375,
+   "dev": 1
+  },
+  {
+   "name": "m13g2",
+   "kind": "ssh",
+   "state": "running",
+   "ndone": 244,
+   "spv": 0.22625020293475065,
+   "price": 0.0945375,
+   "dev": 2
+  },
+  {
+   "name": "m13g3",
+   "kind": "ssh",
+   "state": "running",
+   "ndone": 246,
+   "spv": 0.22257841895576336,
+   "price": 0.0945375,
+   "dev": 3
+  },
+  {
+   "name": "m13g4",
+   "kind": "ssh",
+   "state": "running",
+   "ndone": 244,
+   "spv": 0.24310207849972498,
+   "price": 0.0945375,
+   "dev": 4
+  },
+  {
+   "name": "m13g5",
+   "kind": "ssh",
+   "state": "running",
+   "ndone": 251,
+   "spv": 0.22015157611461617,
+   "price": 0.0945375,
+   "dev": 5
+  },
+  {
+   "name": "m13g6",
+   "kind": "ssh",
+   "state": "running",
+   "ndone": 244,
+   "spv": 0.23431626393835342,
+   "price": 0.0945375,
+   "dev": 6
+  },
+  {
+   "name": "m13g7",
+   "kind": "ssh",
+   "state": "running",
+   "ndone": 250,
+   "spv": 0.21725885370970557,
+   "price": 0.0945375,
+   "dev": 7
+  },
+  {
+   "name": "m57g0",
+   "kind": "ssh",
+   "state": "running",
+   "ndone": 246,
+   "spv": 0.22821022835832833,
+   "price": 0.0945375,
+   "dev": 0
+  },
+  {
+   "name": "m57g1",
+   "kind": "ssh",
+   "state": "running",
+   "ndone": 241,
+   "spv": 0.2336809821688735,
+   "price": 0.0945375,
+   "dev": 1
+  },
+  {
+   "name": "m57g2",
+   "kind": "ssh",
+   "state": "running",
+   "ndone": 246,
+   "spv": 0.2222109573685409,
+   "price": 0.0945375,
+   "dev": 2
+  },
+  {
+   "name": "m57g3",
+   "kind": "ssh",
+   "state": "running",
+   "ndone": 247,
+   "spv": 0.22349557520632773,
+   "price": 0.0945375,
+   "dev": 3
+  },
+  {
+   "name": "m57g4",
+   "kind": "ssh",
+   "state": "running",
+   "ndone": 245,
+   "spv": 0.22108182164388446,
+   "price": 0.0945375,
+   "dev": 4
+  },
+  {
+   "name": "m57g5",
+   "kind": "ssh",
+   "state": "running",
+   "ndone": 245,
+   "spv": 0.22679302174069566,
+   "price": 0.0945375,
+   "dev": 5
+  },
+  {
+   "name": "m57g6",
+   "kind": "ssh",
+   "state": "running",
+   "ndone": 238,
+   "spv": 0.23349265305702765,
+   "price": 0.0945375,
+   "dev": 6
+  },
+  {
+   "name": "m57g7",
+   "kind": "ssh",
+   "state": "running",
+   "ndone": 249,
+   "spv": 0.22137073843632465,
+   "price": 0.0945375,
+   "dev": 7
+  }
+ ],
+ "instances": [
+  {
+   "id": 49965564,
+   "gpu": "RTX 4070S",
+   "n": 8,
+   "dph": 0.7611111111111113,
+   "host": "ssh3.vast.ai",
+   "port": 15564
+  },
+  {
+   "id": 49966074,
+   "gpu": "RTX 4070S",
+   "n": 8,
+   "dph": 0.7611111111111113,
+   "host": "ssh2.vast.ai",
+   "port": 16074
+  },
+  {
+   "id": 49966283,
+   "gpu": "RTX 4070S",
+   "n": 8,
+   "dph": 0.7611111111111113,
+   "host": "ssh4.vast.ai",
+   "port": 16282
+  },
+  {
+   "id": 49966784,
+   "gpu": "RTX 4070S",
+   "n": 8,
+   "dph": 0.7611111111111113,
+   "host": "ssh4.vast.ai",
+   "port": 16784
+  }
+ ],
+ "resultat": [
+  "n=31   V(n) = 2*L(2,n) = 11789367805194968973807616",
+  "n=31   L(2,31)         = 5894683902597484486903808"
+ ]
+}

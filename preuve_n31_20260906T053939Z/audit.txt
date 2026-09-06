@@ -1,0 +1,53 @@
+==============================================================
+ DOSSIER D'AUDIT   n=31   8192 taches   fichier /media/works/test-langford/preuve_n31_20260906T053939Z/parts_n31.txt
+ genere le 2026-09-06T05:39:42Z
+==============================================================
+
+--- 1. completude et unicite -------------------------------
+  aucune tache en double
+  les 8192 taches et la diagonale sont presentes
+
+--- 2. auto-test arithmetique sur le total -----------------
+  n=31   V(n) = 2*L(2,n) = 11789367805194968973807616
+  n=31   L(2,31)         = 5894683902597484486903808
+
+--- 3. code utilise ----------------------------------------
+  SOURCE (doit etre unique -- c'est le seul invariant qui compte) :
+       8193 src:3502d70817915814
+    -> une seule source : bien
+  binaires (plusieurs sont NORMAUX : le 4070 local compile en natif,
+  les cartes louees tournent le .fat -- meme source, builds differents) :
+        238 sha:9663100a82cf44e9
+       7955 sha:bdc36baf20da1eaa
+  source locale actuelle : sha256 3502d70817915814
+
+--- 4. cartes et pilotes -----------------------------------
+      238 gpu:NVIDIA_GeForce_RTX_4070
+     7952 gpu:NVIDIA_GeForce_RTX_4070_SUPER
+        3 gpu:NVIDIA_GeForce_RTX_4090
+        1 drv:580.126.09
+     5982 drv:580.159.03
+     1971 drv:580.173.02
+        1 drv:590.48.01
+      238 drv:610.57.04
+
+--- 5. recalcul redondant d'un echantillon -----------------
+  (12 taches retirees au hasard et refaites ici)
+  tache 1668   IDENTIQUE
+  tache 3242   IDENTIQUE
+  tache 7817   IDENTIQUE
+  tache 4421   IDENTIQUE
+  tache 4142   IDENTIQUE
+  tache 1861   IDENTIQUE
+  tache 250    IDENTIQUE
+  tache 3783   IDENTIQUE
+  tache 2673   IDENTIQUE
+  tache 4896   IDENTIQUE
+  tache 3386   IDENTIQUE
+  tache 5204   IDENTIQUE
+  -> l'echantillon se reproduit au bit pres
+
+==============================================================
+ Reproduire cet audit :  ./audit.sh 31 8192 /media/works/test-langford/preuve_n31_20260906T053939Z/parts_n31.txt
+ Verifier la chaine complete :  ./verify_all.sh
+==============================================================

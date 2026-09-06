@@ -1,0 +1,3 @@
+n=31   V(n) = 2*L(2,n) = 11789367805194968973807616
+n=31   L(2,31)         = 5894683902597484486903808
+8193 tranches lues depuis /media/works/test-langford/parts_merge.txt

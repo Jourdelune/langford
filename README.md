@@ -50,10 +50,23 @@ pour qu'un tiers puisse recalculer, pas seulement relire.
 
 ### Le dossier de preuve
 
-`preuve_n31_20260906T053939Z.tar.gz` — 944 Ko
+Il est **versionné dans ce dépôt**, à la fois déplié et en archive :
+
+| | chemin |
+|---|---|
+| dossier navigable | [`preuve_n31_20260906T053939Z/`](preuve_n31_20260906T053939Z/) |
+| archive (944 Ko) | [`preuve_n31_20260906T053939Z.tar.gz`](preuve_n31_20260906T053939Z.tar.gz) |
+| release GitHub | [`n31-result`](../../releases/tag/n31-result) |
 
 ```
 sha256  ef66b1a3d699c7086634f31e02ada0636fcee7ea3a8039e7a59135e648e5806a
+        preuve_n31_20260906T053939Z.tar.gz
+```
+
+```sh
+git clone https://github.com/Jourdelune/langford && cd langford
+sha256sum -c <<< "ef66b1a3d699c7086634f31e02ada0636fcee7ea3a8039e7a59135e648e5806a  preuve_n31_20260906T053939Z.tar.gz"
+cd preuve_n31_20260906T053939Z && sha256sum -c SHA256SUMS
 ```
 
 | fichier | sha256 (tronqué) | contenu |
@@ -66,6 +79,11 @@ sha256  ef66b1a3d699c7086634f31e02ada0636fcee7ea3a8039e7a59135e648e5806a
 
 Chaque fichier est haché dans `SHA256SUMS` ; `sha256sum -c SHA256SUMS` vérifie
 le tout.
+
+Le manifeste porte `"git_propre": false`. Ce n'est pas une anomalie : à l'instant
+où il a été écrit, l'arbre de travail contenait les sorties non suivies du run
+lui-même — `parts_n31.txt` et le dossier de preuve en cours d'écriture. Le champ
+`git_commit` désigne, lui, le commit exact du code qui a produit le résultat.
 
 ### Les quatre contrôles, et ce que chacun attrape
 
@@ -496,10 +514,23 @@ so a third party can *recompute*, not merely read.
 
 ### The proof bundle
 
-`preuve_n31_20260906T053939Z.tar.gz` — 944 KB
+It is **committed to this repository**, both unpacked and as an archive:
+
+| | path |
+|---|---|
+| browsable directory | [`preuve_n31_20260906T053939Z/`](preuve_n31_20260906T053939Z/) |
+| archive (944 KB) | [`preuve_n31_20260906T053939Z.tar.gz`](preuve_n31_20260906T053939Z.tar.gz) |
+| GitHub release | [`n31-result`](../../releases/tag/n31-result) |
 
 ```
 sha256  ef66b1a3d699c7086634f31e02ada0636fcee7ea3a8039e7a59135e648e5806a
+        preuve_n31_20260906T053939Z.tar.gz
+```
+
+```sh
+git clone https://github.com/Jourdelune/langford && cd langford
+sha256sum -c <<< "ef66b1a3d699c7086634f31e02ada0636fcee7ea3a8039e7a59135e648e5806a  preuve_n31_20260906T053939Z.tar.gz"
+cd preuve_n31_20260906T053939Z && sha256sum -c SHA256SUMS
 ```
 
 | file | sha256 (truncated) | contents |
@@ -511,6 +542,11 @@ sha256  ef66b1a3d699c7086634f31e02ada0636fcee7ea3a8039e7a59135e648e5806a
 | `manifeste.json` | `7762717c17865e78…` | git commit, source sha256, inventory of workers and rented machines |
 
 Every file is hashed in `SHA256SUMS`; `sha256sum -c SHA256SUMS` checks the lot.
+
+The manifest records `"git_propre": false`. This is not an anomaly: at the moment
+it was written, the working tree held the run's own untracked outputs —
+`parts_n31.txt` and the proof directory being written. The `git_commit` field
+does pin the exact commit of the code that produced the result.
 
 ### The four checks, and what each one catches
 
