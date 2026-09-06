@@ -1,25 +1,530 @@
 # Langford L(2,31)
 
-**[Français](#fr) · [English](#en)**
+**[English](#en) · [Français](#fr)**
 
 ```
 L(2,31) = 5 894 683 902 597 484 486 903 808
 V(31)   = 2·L(2,31) = 11 789 367 805 194 968 973 807 616
 ```
 
-Calculé le 6 septembre 2026 en 15,7 heures sur 33 GPU, pour ~50 $.
-Aucune valeur de L(2,31) n'avait été publiée auparavant.
+Computed on 6 September 2026 in 15.7 hours on 33 GPUs, for about $50.
+No value of L(2,31) had ever been published.
 
-> **Ce dépôt est entièrement l'œuvre d'une IA.** Les 40 commits, du premier au
-> dernier, ont été écrits par **Claude Opus 5** — algorithme, noyau CUDA,
-> orchestration, vérification et cette page. Détail : [Travail réalisé par IA](#ia).
+> **This repository is entirely the work of an AI.** All 40 commits, from the
+> first to the last, were written by **Claude Opus 5** — algorithm, CUDA kernel,
+> orchestration, verification and this page. Detail: [AI-authored work](#ai).
 
-**[📄 Le papier (PDF, 7 pages)](paper/langford31.pdf)** — méthode, optimisations,
-vérification et résultat, illustré. [Source LaTeX](paper/langford31.tex).
+**[📄 The paper (PDF, 7 pages)](paper/langford31.pdf)** — method, optimizations,
+verification and result, illustrated. [LaTeX source](paper/langford31.tex).
 
-Le journal de bord complet — quatorze pistes fermées, les mesures ratées, les
-preuves de non-existence — est dans **[TRACE.md](TRACE.md)** (2 300 lignes).
-Cette page en est le résumé.
+The complete lab notebook — fourteen closed avenues, the botched measurements,
+the non-existence proofs — is in **[TRACE.md](TRACE.md)** (2,300 lines). This
+page is its summary.
+
+---
+
+<a id="en"></a>
+
+# English
+
+## The result
+
+A **Langford pairing** L(2,n) arranges the integers 1…n, each twice, over 2n
+slots so that the two copies of *k* are separated by exactly *k* slots. For n=3:
+`3 1 2 1 3 2`. Such sequences exist only when n ≡ 0 or 3 (mod 4) — the Davies
+condition (1959).
+
+Counting *all* pairings for a given n is the hard problem.
+[OEIS A014552](https://oeis.org/A014552) lists the known values; it stopped at
+n=28, computed in 2015. **n=31 was the open record.**
+
+| n | L(2,n) | by |
+|---|---|---|
+| 27 | 111 683 611 098 764 903 232 | Assarpour, Bar-Noy & Liu (2015) |
+| 28 | 1 607 383 260 609 382 393 152 | Assarpour, Bar-Noy & Liu (2015) |
+| **31** | **5 894 683 902 597 484 486 903 808** | **this repository (2026)** |
+
+The computation was split into 8,192 slices plus one "diagonal" task, spread
+across 32 rented RTX 4070 Supers and one local RTX 4070.
+
+### Why is `V(n) = 2·L(2,n)`?
+
+Because the two quantities count different things. Godfrey's sum naturally
+produces **`V(n)`, the number of arrangements** — sequences as written, left to
+right. But `L(2,n)`, the value in OEIS A014552, counts pairings **up to
+reversal**: a sequence and its mirror image are the same object.
+
+Going from one to the other is an exact division by 2, and that is not a
+convenient convention — it is a theorem: **no Langford pairing is its own mirror
+image.** Were an arrangement invariant under the reflection p ↦ 2n+1−p, the pair
+carrying value *k*, at positions *i* and *i+k+1*, would have to map to itself:
+
+```math
+\{\, 2n-i-k,\; 2n+1-i \,\} = \{\, i,\; i+k+1 \,\}
+\qquad \Longrightarrow \qquad 2i = 2n-k
+```
+
+For **odd** *k* that equation has no integer solution. Since the values run from
+1 to *n*, an odd *k* always exists: the reflection is a **fixed-point-free**
+involution, so it pairs arrangements up exactly two by two, and `V(n)` is even.
+
+The program uses this as a test. It requires the total to be divisible by
+`2^(2n+1)` rather than `2^(2n)` — that extra bit is precisely this one. An odd
+`V`, which the final shift would silently truncate, therefore becomes an
+**error** rather than a wrong but plausible result.
+
+<a id="verify"></a>
+
+## Verifying the result yourself
+
+A number with no way to contradict it is worthless. Everything below is provided
+so a third party can *recompute*, not merely read.
+
+### The proof bundle
+
+It is **committed to this repository**, both unpacked and as an archive:
+
+| | path |
+|---|---|
+| browsable directory | [`preuve_n31_20260906T053939Z/`](preuve_n31_20260906T053939Z/) |
+| archive (944 KB) | [`preuve_n31_20260906T053939Z.tar.gz`](preuve_n31_20260906T053939Z.tar.gz) |
+| GitHub release | [`n31-result`](https://github.com/Jourdelune/langford/releases/tag/n31-result) |
+
+```
+sha256  ef66b1a3d699c7086634f31e02ada0636fcee7ea3a8039e7a59135e648e5806a
+        preuve_n31_20260906T053939Z.tar.gz
+```
+
+```sh
+git clone https://github.com/Jourdelune/langford && cd langford
+sha256sum -c <<< "ef66b1a3d699c7086634f31e02ada0636fcee7ea3a8039e7a59135e648e5806a  preuve_n31_20260906T053939Z.tar.gz"
+cd preuve_n31_20260906T053939Z && sha256sum -c SHA256SUMS
+```
+
+| file | sha256 (truncated) | contents |
+|---|---|---|
+| `parts_n31.txt` | `1765a9c05338d642…` | all 8,193 partial sums, **each with its provenance**: card, driver, binary hash, source hash, duration, UTC timestamp |
+| `resultat.txt` | `a03a6eba950182bd…` | merge output with its self-test |
+| `state.db` | `434acc15be8f80da…` | SQLite snapshot of the full run state |
+| `audit.txt` | `f53143ae46496e24…` | the complete audit dossier |
+| `manifeste.json` | `7762717c17865e78…` | git commit, source sha256, inventory of workers and rented machines |
+
+Every file is hashed in `SHA256SUMS`; `sha256sum -c SHA256SUMS` checks the lot.
+
+The manifest records `"git_propre": false`. This is not an anomaly: at the moment
+it was written, the working tree held the run's own untracked outputs —
+`parts_n31.txt` and the proof directory being written. The `git_commit` field
+does pin the exact commit of the code that produced the result.
+
+### The four checks, and what each one catches
+
+**1. Completeness and uniqueness.** All 8,192 slices plus the diagonal are
+present, none duplicated. *Catches*: a lost or double-counted slice.
+
+**2. Arithmetic self-test.** Each summand is a product of the n factors A_i, and
+A_i ≡ i (mod 2); the ⌊(n+1)/2⌋ even gaps each contribute a factor of 2. The
+total must therefore be divisible by 2^(2n+1) = 2^63. One corrupted slice makes
+the test fail. *Catches*: a partial sum altered in transit or in memory. Run by
+`langford6 --merge` **before** any machine is destroyed.
+
+**3. Redundant recomputation.** Twelve randomly drawn slices were **recomputed
+locally** on a different card with a different binary, then compared bit-for-bit
+against what the rented machines returned:
+
+```
+task 1668 3242 7817 4421 4142 1861 250 3783 2673 4896 3386 5204   IDENTICAL
+-> the sample reproduces bit-for-bit          (12/12)
+```
+
+*Catches*: a faulty card, a different binary, a slice computed over the wrong
+interval.
+
+**4. Cross-checking two algorithms** — the strongest. `refvals.txt` holds slices
+produced **twice by two independent algorithms**: the GPU kernel (Godfrey's
+identity) and `slice_ref` (classical backtracking). For n=31 at the three
+extreme `vhi` regimes, plus n=28, 27, 24, 20:
+
+```
+$ ./check_refs.sh
+  n=31  vhi=0         OK        n=28  vhi=1048575  OK
+  n=31  vhi=4194304   OK        n=27  vhi=524287   OK
+  n=31  vhi=8388607   OK        n=24  vhi=65535    OK
+                                n=20  vhi=63       OK
+  7 reference value(s) confirmed, 0 divergence(s)
+```
+
+*Catches*: an error in the method itself, not just in its execution. This is the
+only check that does not assume Godfrey's identity is correctly implemented.
+
+### The independent yardstick
+
+`estimate.c` implements **Knuth's unbiased estimator (1975)** for backtracking
+tree size: walk a random root-to-leaf path, multiplying the running weight by the
+number of legal children at each node. The expected weight is exactly the number
+of leaves.
+
+| trials | estimate of L(2,31) | std. error (1σ) | gap to computed value |
+|---|---|---|---|
+| 2 · 10⁶ | 5.74000 · 10²⁴ | ± 2.00 % | +2.695 % (1.35 σ) |
+| 2 · 10⁷ | 5.87786 · 10²⁴ | ± 0.38 % | +0.286 % (0.75 σ) |
+| 2 · 10⁸ | 5.88528 · 10²⁴ | ± 0.12 % | **+0.160 %** (1.33 σ) |
+
+The relative gap shrinks monotonically — 2.7 %, then 0.29 %, then 0.16 % — and
+the estimate rises **toward** the computed value each time. That is the expected
+behaviour: the weight distribution is heavily right-skewed, so the median of a
+finite sample falls below the true value and a small sample systematically
+underestimates. An independent Monte-Carlo landing within 0.16 % of a 25-digit
+integer is a good yardstick — but **only** a yardstick: it can never confirm the
+trailing digits.
+
+### Reproducing the computation
+
+```sh
+./build.sh                                    # build everything
+./langford6 -n 12                             # must print 108144
+./verify_all.sh                               # full chain on small n
+./check_refs.sh                               # cross-check the two algorithms
+./audit.sh 31 8192 parts_n31.txt              # the complete audit dossier
+
+# the computation itself, one slice at a time (stateless, replayable)
+./run_shard.sh <i> 8192 31                    # i from 0 to 8191
+./langford6 -n 31 --diag                      # the diagonal task
+./langford6 -n 31 --merge-file parts.txt      # conclude
+```
+
+## The method, explained
+
+### 1. Counting becomes summing — Godfrey's identity (2002)
+
+A Langford pairing is a perfect matching of the 2n positions whose multiset of
+gaps is exactly {2, 3, …, n+1}. Godfrey encodes this in a polynomial:
+
+```math
+F(n,X) \;=\; \prod_{i=2}^{n+1} A_i(X),
+\qquad
+A_i(X) \;=\; \sum_{k=1}^{2n-i} x_k\,x_{k+i}
+```
+
+`A_i` enumerates every way to place a pair with gap *i*. The number of pairings
+is the coefficient of the monomial x₁x₂…x_{2n} in F.
+
+The trick: F is homogeneous of degree 2n in 2n variables, so **every monomial
+other than x₁x₂…x_{2n} has some variable at an even exponent**. Substituting
+x_k = ±1 and summing over all 2^{2n} assignments annihilates all of them,
+leaving only the one we want:
+
+```math
+V(n) \;=\; 2\,L(2,n) \;=\; 2^{-2n}
+\sum_{X \in \{-1,1\}^{2n}} \Big( \prod_{k=1}^{2n} x_k \Big)\, F(n,X)
+```
+
+A combinatorial counting problem becomes **a sum of 4ⁿ integer terms**. Each
+term is independent — ideal for a GPU. Cost Θ(4ⁿ), unchanged since 2002; [§5 of TRACE.md](TRACE.md#s5) explains, across fourteen closed avenues, why nobody knows
+how to do better.
+
+### 2. The order-8 symmetry group
+
+Two symmetries leave the sum invariant:
+
+- **the Klein group** — negating all even-indexed, or all odd-indexed, variables
+  does not change the product;
+- **the reflection** p ↦ 2n+1−p, which reverses the sequence.
+
+Together: a group of order 8. So only one eighth of the points is computed, then
+multiplied by 8. The 2015 paper lists these symmetries but extracts only a factor
+of 4; the full factor of 8 is worth a further **×2.00**.
+
+Caution: this reduction is **valid only when n ≡ 0 or 3 (mod 4)**. Negating a row
+multiplies the product by (−1)^MO and the weight by (−1)^N; the summand is
+invariant only when MO + N is even. At other n the kernel would return a
+perfectly wrong and perfectly plausible number — for n=9 it reported 5558 where
+the answer is 0. The program therefore **refuses** those n.
+
+### 3. The parity decomposition — the structural idea
+
+Separate the **odd** positions (row `o`, n cells) from the **even** ones (row
+`e`). An index computation gives, for every n:
+
+```math
+\begin{aligned}
+\text{EVEN gap } i = 2m &: \quad A_i = P_m(o) + Q_m(e)
+      &&\text{— rows separated} \\[4pt]
+\text{ODD gap } i = 2m+1 &: \quad A_i = \sum_j O_j E_{j+m} + \sum_j E_j O_{j+m+1}
+      &&\text{— bilinear}
+\end{aligned}
+```
+
+where P_m and Q_m are the row autocorrelations at lag m. Verified exactly over
+6.2 million gaps up to n=31, zero divergence.
+
+The second, decisive observation: `A_i` is a sum of (2n−i) terms of ±1, hence
+**A_i ≡ i (mod 2)**. Only **even** gaps can vanish — and it is a vanishing factor
+that decides a point contributes nothing.
+
+Put together: **a point's survival depends on row `o` only through a constant
+vector.** For a fixed `e_hi`, the table `e_lo → Q(e)` does not depend on `o` at
+all and is computed once for a whole block of threads. The hot loop — the
+incremental state update at every point — **disappears**, replaced by *survival
+bitmaps*. This is the repository's one genuinely structural idea: **×2.21**.
+
+The two-row decomposition was known (it yields the classical n ≡ 0,3 mod 4
+argument) but was believed to carry no algorithmic gain. Exploiting it as a
+*separation of variables* is what is new.
+
+### 4. The 87 % null products
+
+Only one point in eight contributes; the rest have at least one vanishing factor.
+The observation is old, but it was dismissed as unexploitable under SIMT — within
+a warp, if only one thread in 32 has work, the other 31 wait anyway.
+
+**Warp compaction** (a standard NVIDIA technique) removes the objection:
+survivors are gathered into a queue before processing, so the useful work is
+dense. **×1.77**.
+
+## The optimizations, one by one
+
+Every row gives the cost of **n=31 on the same RTX 4070**, which makes the gains
+comparable. Each factor is the gain over the previous row.
+
+| # | what changes | n=31 | gain | origin |
+|---|---|---|---|---|
+| | **Bare Godfrey (2002)** — no symmetry, modular + CRT | ≈ 4,500 d | — | literature |
+| 1 | **order-4 symmetry** → the published state of the art (2015) | ≈ 1,100 d | ×4.1 | literature ([Assarpour *et al.* §4](https://arxiv.org/abs/1507.00315)) |
+| 2 | **truncated 160-bit bignum** instead of modular + CRT | 360 d | ×3.06 | outside Langford (Knuth TAOCP II §4.3.1) |
+| 3 | **order-8 symmetry** — reflection as well | 180.1 d | ×2.00 | mixed |
+| 4 | **skipping null products** + warp compaction | 101.7 d | ×1.77 | mixed |
+| 5 | **half-state** — only even gaps decide | 75.0 d | ×1.36 | derived from A_i ≡ i (mod 2) |
+| 6 | **parity + survival bitmaps** — the hot loop disappears | 34.0 d | ×2.21 | **new here** |
+| 7 | **PTX carry chains** + `prmt` extraction | 30.9 d | ×1.10 | outside Langford |
+| 8 | **odd gaps tabulated** on the `threadIdx` axis | **25.8 d** | ×1.20 | **new here** |
+
+> **From the published state of the art (2015) to this repository, on identical
+> hardware: ×42.6.** From bare Godfrey: ×174. Direct end-to-end measurement:
+> ×45.
+
+Exactly one row is a **model** rather than a measurement: row 2. The published
+version is not reimplemented here; its cost is reconstructed from its two
+differences with v3. The resulting uncertainty gives an honest range of **×29 to
+×54** for the total. Rows 1 and 3 are exact *by construction* (they merely count
+the enumerated points); rows 4–8 are measured ratios, GPU idle, paired on the
+same sample.
+
+**Most of the gain is engineering, not an idea.** One row is structural (×2.21);
+everything else — arithmetic, full symmetry, compaction, PTX, tabulation — is
+worth ×19.4 on its own.
+
+### Two negative results, quantified
+
+They cost time and deserve publishing, if only to spare someone else the trip:
+
+- **Kasteleyn does not apply.** A Pfaffian orientation would give 2ⁿ·n³ instead
+  of 4ⁿ and the record would fall in minutes. Refuted under the weak, correct
+  form of the problem, over GF(2) **and** over Z/2^k up to k=32.
+- **Tensor cores do not beat `popc`.** The reflex "it's bilinear, so it's a GEMM,
+  so it's fast" is wrong here: `popc` on a 32-bit XOR *is* a length-32 binary dot
+  product, INT8 leads by only ×2.48 on this card, and the sparsity (12.9 %
+  survivors, which a dense MMA cannot exploit) turns that into a **×4.1
+  deficit**.
+
+## Comparison with the 2015 state of the art
+
+On **L(28)**, the last point of the published record — i.e. on an identical
+instance:
+
+| | hardware | time | GPU-days |
+|---|---|---|---|
+| Assarpour, Bar-Noy & Liu (2015) | ~32 Kepler GPUs | ~9 days | ~288 |
+| **this repository** | 1 × RTX 4070 | **≈ 10.6 h** | **0.44** |
+
+That is **~650× fewer GPU-days**. It has to be decomposed honestly:
+
+- **6–11×** comes from **hardware** — a 2013 Kepler delivers ~1.3·10¹² integer
+  ops/s against ~7.3·10¹² for a 4070;
+- **~45×** comes from the **algorithm and implementation**, measured on identical
+  hardware;
+- the remainder absorbs the efficiency of their distribution across ~32 cards.
+
+**Asymptotically there is no progress at all.** The algorithm remains Θ(4ⁿ) and
+the exponent has not moved since 2002. This repository wins **constants**, not an
+exponent, and claims nothing else.
+
+## What about n=32?
+
+n=32 ≡ 0 (mod 4), so pairings exist. Cost goes as 4ⁿ: **exactly 4× n=31**. The
+estimator gives, over 2·10⁷ trials:
+
+```
+L(2,32) ≈ 9.744 · 10²⁵   ± 0.45 %        log2(V) = 87.333
+```
+
+### The GPU time required
+
+This is the one quantity independent of how many cards you line up. It follows
+without uncertainty: cost goes as 4ⁿ, so **n=32 = 4 × n=31**, and n=31 was
+measured on four cards by the same fixed-seed benchmark (identical `vhi` sample
+on both sides, hence a paired comparison).
+
+| card | n=31 | **n=32 = ×4** | where the figure comes from |
+|---|---|---|---|
+| RTX 4070 | 544 GPU-h | **2,177 GPU-h** | measured, current source |
+| RTX 4070 Super | 497 GPU-h | **1,988 GPU-h** | measured, current source; **confirmed to +0.2 % by the real run** |
+| RTX 4090 | ~204 GPU-h | ~815 GPU-h | derived from the paired ratio ×2.67 |
+| RTX 5090 | ~174 GPU-h | ~695 GPU-h | derived from the paired ratio ×3.13 |
+
+**About 2,000 GPU-hours on a 4070 Super; ~800 on a 4090.** For comparison, n=31
+consumed 498 on the rented cards against 497 predicted before renting — it is
+that 0.2 % agreement that lends confidence to the ×4 projection.
+
+The first two rows are measured with the very binary that produced the result, on
+the same fixed-seed sample of 96 `vhi`. The last two are not: their absolute
+values predate v7, and only the card-to-card **ratio** is considered stable ([§7.1 of TRACE.md](TRACE.md#s71)). They are therefore obtained by applying that ratio to
+the current 4070 measurement, and should be re-measured before committing to a
+rental.
+
+Wall-clock time is just a division: the same fleet of 32 × 4070 Super would do it
+in **62 h**, 128 cards in 16 h. The dollar cost is likewise fleet-independent —
+**≈ $190** at $0.0945/GPU-h, the rate actually paid here. n=32 is therefore
+**immediately within reach**.
+
+### What it would take in code — three real obstacles
+
+**1. The kernel is not instantiated for 32.** `pick()` and `dpick()` only cover
+{9…24, 27, 28, 31}. `INST(32)` and `DINST(32)` must be added.
+
+**2. A silent overflow in the row mask.** Rows are `uint32_t` and the code
+computes:
+
+```c
+const uint32_t ALLB0 = (1u<<N)-1u;      // N=32  ->  1u<<32
+```
+
+Shifting a 32-bit type by 32 is **undefined behaviour** in C/C++. On current
+hardware it yields 1 (shift modulo 32), so `ALLB0` would be 0 and row negation
+would be silently wrong. This needs either a special case or a wider
+representation. **n=32 is the last n that fits in a `uint32_t`**: 32 cells per
+row, 31 free bits after pinning.
+
+**3. The accumulator margin tightens.** The total is V·2^{2n}, so:
+
+| n | log2(V) | + 2n | bits used / 160 | margin |
+|---|---|---|---|---|
+| 31 | 83.3 | 62 | 145.3 | 14.7 bits |
+| 32 | 87.3 | 64 | **151.3** | **8.7 bits** |
+
+It fits, but only ~8.7 bits remain. For n=35 (the next n ≡ 3 mod 4) a 160-bit
+accumulator would be insufficient.
+
+### This record should not last
+
+That is probably the most useful thing this repository can say.
+
+n=31 cost **$50 and 15.7 hours**. n=32 needs **~2,000 GPU-h and ~$190** — under
+three days on the same fleet. That is no longer an institutional computation:
+it is within reach of an individual with a credit card, and the software to do
+it is published here, verification chain included.
+
+The ×42 factor over the state of the art did not move the exponent, but it moved
+the **accessibility threshold**. What required a cluster in 2015 now fits on a
+restaurant bill. We therefore expect L(2,31) to be superseded quickly — and the
+repository is arranged to make that easy rather than meritorious.
+
+The real wall remains the 4ⁿ: each further n costs 4×, and n=35 would cost 256×
+n=31 — roughly 127,000 GPU-h and ~$12,000. [§5 of TRACE.md](TRACE.md#s5) argues that
+breaking that exponent would require an unknown mechanism.
+
+## Cost of the experiment
+
+| item | amount |
+|---|---|
+| compute — 15.7 h × $3.044/h (4 machines × 8 RTX 4070 Super) | $47.74 |
+| aborted rentals (a preempted 14×4090, a fraudulent 8×4090, tunnel retries) | ≈ $2 |
+| local RTX 4070 | electricity |
+| **total** | **≈ $50** |
+
+The computation consumed **498 GPU-h** on the rented cards against the **497 h**
+predicted by the benchmark before renting: a **+0.2 %** discrepancy. Load stayed
+balanced across the four machines (2,027 / 1,998 / 1,970 / 1,957 tasks), and the
+local 4070 absorbed 238.
+
+One lesson was paid for in cash: the cheapest offer on the market, an "8× RTX
+4090" at $1.72/h, **faked `nvidia-smi`** through an `/opt/fake/nvml_reader.py`
+and ran no sm_89 kernel at all. The discount was the symptom. The orchestrator
+now rejects such hosts automatically and accepts a machine only after making it
+compute L(2,12) = 108144.
+
+<a id="ai"></a>
+
+## AI-authored work
+
+**This entire repository was produced by Claude Opus 5** (Anthropic), from the
+first commit onward. All 40 commits carry `Co-Authored-By: Claude Opus 5`, across
+three sessions between 4 and 6 September 2026.
+
+That covers: deriving the parity decomposition and its proof, the CUDA kernel and
+its PTX assembly, the fourteen research avenues explored and then closed
+(including the two negative results above), the distributed orchestrator and its
+preemption tolerance, the verification chain, renting and driving GPUs at an
+external provider, and this page.
+
+The human role was to set the objectives, provide access to the hardware and the
+rental account, and arbitrate spending decisions.
+
+What was **not** delegated to the AI: verification by third parties. That is
+precisely why the [Verifying the result yourself](#verify)
+section exists and why every partial sum carries its provenance. A result
+produced by an AI does not need independent recomputation any less than one
+produced by a human — it needs it more.
+
+<a id="refs"></a>
+
+## References
+
+**The problem**
+
+- C. D. Langford, *Problem*, Math. Gazette **42** (1958), 228.
+- R. O. Davies, *On Langford's problem II*, Math. Gazette **43** (1959), 253–255. — existence condition n ≡ 0, 3 (mod 4)
+- T. Skolem, *On certain distributions of integers in pairs with given differences*, Math. Scand. **5** (1957), 57–68.
+- [OEIS A014552](https://oeis.org/A014552) — L(2,n); [A059106](https://oeis.org/A059106) — the Skolem variant.
+
+**The counting method**
+
+- M. Godfrey, algebraic method (2002). No formal publication; described in [Assarpour–Bar-Noy–Liu §3](https://arxiv.org/abs/1507.00315) and in D. E. Knuth, *TAOCP* vol. 4, pre-fascicle 5B, section "Langford pairs".
+- A. Assarpour, A. Bar-Noy, O. Liu, *Counting Skolem Sequences*, [arXiv:1507.00315](https://arxiv.org/abs/1507.00315) (2015, rev. 2017). — L(27) and L(28), a CUDA implementation of Godfrey's method; **this is the state of the art the present repository compares against**
+- M. Krajecki, C. Jaillet, A. Bui *et al.*, CONFIIT distributed computations (2004–2005) — values up to n=24.
+- D. E. Knuth, *Estimating the efficiency of backtrack programs*, Math. Comp. **29** (1975), 121–136. — the unbiased estimator implemented in `estimate.c`
+
+**Avenues evaluated, then closed**
+
+- P. W. Kasteleyn, *The statistics of dimers on a lattice*, Physica **27** (1961); *Dimer statistics and phase transitions*, J. Math. Phys. **4** (1963). — Pfaffian orientations
+- L. Lovász, M. D. Plummer, *Matching Theory*, ch. 8.
+- A. Björklund, *Counting Perfect Matchings as Fast as Ryser*, SODA 2012, [arXiv:1107.4466](https://arxiv.org/abs/1107.4466).
+- *Counting perfect matchings and Hamiltonian cycles faster*, [arXiv:2309.15422](https://arxiv.org/abs/2309.15422) (2023).
+- *A New Direction for Counting Perfect Matchings*, [arXiv:1208.2329](https://arxiv.org/abs/1208.2329).
+- M. Cygan *et al.*, *On problems as hard as CNF-SAT* / the Set Cover Conjecture (2016) — the 2^{|U|} barrier.
+
+**Implementation techniques**
+
+- F. Gray, US patent 2632058 (1953) — reflected binary code.
+- R. J. Fisher, H. G. Dietz, *Compiling for SIMD Within A Register*, LCPC 1998.
+- S. E. Anderson, *Bit Twiddling Hacks*.
+- D. E. Knuth, *TAOCP* vol. 2, §4.3.1 — multiple-precision multiplication.
+- NVIDIA, *CUDA Pro Tip: Optimized Filtering with Warp-Aggregated Atomics* — warp-aggregated stream compaction.
+
+## Files
+
+| file | role |
+|---|---|
+| `langford6.cu` | the CUDA kernel, all optimizations |
+| `slice_ref.c` | the reference implementation, a *different* algorithm |
+| `orchestrator.py` | renting, lease-based distribution, preemption recovery |
+| `finalize.py` | closing out: preserve, release machines, prove |
+| `dashboard.py` | progress at `http://localhost:8800` |
+| `audit.sh` | the audit dossier, redundant recomputation included |
+| `check_refs.sh` | cross-check of the two algorithms |
+| `verify_all.sh` | full chain on small n |
+| `estimate.c` | Knuth's estimator, independent yardstick |
+| **[paper/langford31.pdf](paper/langford31.pdf)** | **the paper, 7 illustrated pages** (`make` in `paper/` rebuilds it) |
+| **[TRACE.md](TRACE.md)** | **the complete lab notebook, 2,300 lines** |
 
 ---
 
@@ -494,40 +999,11 @@ existe et pourquoi chaque somme partielle porte sa provenance. Un résultat
 produit par une IA n'a pas moins besoin d'être recalculé par quelqu'un
 d'autre — il en a davantage besoin.
 
-<a id="refs"></a>
+<a id="refs-fr"></a>
 
 ## Références
 
-**Le problème**
-
-- C. D. Langford, *Problem*, Math. Gazette **42** (1958), 228.
-- R. O. Davies, *On Langford's problem II*, Math. Gazette **43** (1959), 253–255. — condition d'existence n ≡ 0, 3 (mod 4)
-- T. Skolem, *On certain distributions of integers in pairs with given differences*, Math. Scand. **5** (1957), 57–68.
-- [OEIS A014552](https://oeis.org/A014552) — L(2,n) ; [A059106](https://oeis.org/A059106) — variante de Skolem.
-
-**La méthode de comptage**
-
-- M. Godfrey, méthode algébrique (2002). Pas de publication formelle ; décrite dans [Assarpour–Bar-Noy–Liu §3](https://arxiv.org/abs/1507.00315) et dans D. E. Knuth, *TAOCP* vol. 4, pré-fascicule 5B, section « Langford pairs ».
-- A. Assarpour, A. Bar-Noy, O. Liu, *Counting Skolem Sequences*, [arXiv:1507.00315](https://arxiv.org/abs/1507.00315) (2015, rév. 2017). — L(27) et L(28), implémentation CUDA de Godfrey ; **c'est l'état de l'art auquel ce dépôt se compare**
-- M. Krajecki, C. Jaillet, A. Bui *et al.*, calculs distribués CONFIIT (2004–2005) — valeurs jusqu'à n=24.
-- D. E. Knuth, *Estimating the efficiency of backtrack programs*, Math. Comp. **29** (1975), 121–136. — l'estimateur non biaisé de `estimate.c`
-
-**Les pistes évaluées puis fermées**
-
-- P. W. Kasteleyn, *The statistics of dimers on a lattice*, Physica **27** (1961) ; *Dimer statistics and phase transitions*, J. Math. Phys. **4** (1963). — orientations pfaffiennes
-- L. Lovász, M. D. Plummer, *Matching Theory*, ch. 8.
-- A. Björklund, *Counting Perfect Matchings as Fast as Ryser*, SODA 2012, [arXiv:1107.4466](https://arxiv.org/abs/1107.4466).
-- *Counting perfect matchings and Hamiltonian cycles faster*, [arXiv:2309.15422](https://arxiv.org/abs/2309.15422) (2023).
-- *A New Direction for Counting Perfect Matchings*, [arXiv:1208.2329](https://arxiv.org/abs/1208.2329).
-- M. Cygan *et al.*, *On problems as hard as CNF-SAT* / Set Cover Conjecture (2016) — la barrière 2^{|U|}.
-
-**Techniques d'implémentation**
-
-- F. Gray, brevet US 2632058 (1953) — code binaire réfléchi.
-- R. J. Fisher, H. G. Dietz, *Compiling for SIMD Within A Register*, LCPC 1998.
-- S. E. Anderson, *Bit Twiddling Hacks*.
-- D. E. Knuth, *TAOCP* vol. 2, §4.3.1 — multiplication multi-précision.
-- NVIDIA, *CUDA Pro Tip: Optimized Filtering with Warp-Aggregated Atomics* — compaction de flux par warp.
+Voir la [section anglaise](#refs) ci-dessus ; la bibliographie est identique.
 
 ## Fichiers
 
@@ -544,477 +1020,3 @@ d'autre — il en a davantage besoin.
 | `estimate.c` | estimateur de Knuth, repère indépendant |
 | **[paper/langford31.pdf](paper/langford31.pdf)** | **le papier, 7 pages illustrées** (`make` dans `paper/` le reconstruit) |
 | **[TRACE.md](TRACE.md)** | **le journal de bord complet, 2 300 lignes** |
-
----
-
-<a id="en"></a>
-
-# English
-
-## The result
-
-A **Langford pairing** L(2,n) arranges the integers 1…n, each twice, over 2n
-slots so that the two copies of *k* are separated by exactly *k* slots. For n=3:
-`3 1 2 1 3 2`. Such sequences exist only when n ≡ 0 or 3 (mod 4) — the Davies
-condition (1959).
-
-Counting *all* pairings for a given n is the hard problem.
-[OEIS A014552](https://oeis.org/A014552) lists the known values; it stopped at
-n=28, computed in 2015. **n=31 was the open record.**
-
-| n | L(2,n) | by |
-|---|---|---|
-| 27 | 111 683 611 098 764 903 232 | Assarpour, Bar-Noy & Liu (2015) |
-| 28 | 1 607 383 260 609 382 393 152 | Assarpour, Bar-Noy & Liu (2015) |
-| **31** | **5 894 683 902 597 484 486 903 808** | **this repository (2026)** |
-
-The computation was split into 8,192 slices plus one "diagonal" task, spread
-across 32 rented RTX 4070 Supers and one local RTX 4070.
-
-### Why is `V(n) = 2·L(2,n)`?
-
-Because the two quantities count different things. Godfrey's sum naturally
-produces **`V(n)`, the number of arrangements** — sequences as written, left to
-right. But `L(2,n)`, the value in OEIS A014552, counts pairings **up to
-reversal**: a sequence and its mirror image are the same object.
-
-Going from one to the other is an exact division by 2, and that is not a
-convenient convention — it is a theorem: **no Langford pairing is its own mirror
-image.** Were an arrangement invariant under the reflection p ↦ 2n+1−p, the pair
-carrying value *k*, at positions *i* and *i+k+1*, would have to map to itself:
-
-```math
-\{\, 2n-i-k,\; 2n+1-i \,\} = \{\, i,\; i+k+1 \,\}
-\qquad \Longrightarrow \qquad 2i = 2n-k
-```
-
-For **odd** *k* that equation has no integer solution. Since the values run from
-1 to *n*, an odd *k* always exists: the reflection is a **fixed-point-free**
-involution, so it pairs arrangements up exactly two by two, and `V(n)` is even.
-
-The program uses this as a test. It requires the total to be divisible by
-`2^(2n+1)` rather than `2^(2n)` — that extra bit is precisely this one. An odd
-`V`, which the final shift would silently truncate, therefore becomes an
-**error** rather than a wrong but plausible result.
-
-<a id="verify"></a>
-
-## Verifying the result yourself
-
-A number with no way to contradict it is worthless. Everything below is provided
-so a third party can *recompute*, not merely read.
-
-### The proof bundle
-
-It is **committed to this repository**, both unpacked and as an archive:
-
-| | path |
-|---|---|
-| browsable directory | [`preuve_n31_20260906T053939Z/`](preuve_n31_20260906T053939Z/) |
-| archive (944 KB) | [`preuve_n31_20260906T053939Z.tar.gz`](preuve_n31_20260906T053939Z.tar.gz) |
-| GitHub release | [`n31-result`](https://github.com/Jourdelune/langford/releases/tag/n31-result) |
-
-```
-sha256  ef66b1a3d699c7086634f31e02ada0636fcee7ea3a8039e7a59135e648e5806a
-        preuve_n31_20260906T053939Z.tar.gz
-```
-
-```sh
-git clone https://github.com/Jourdelune/langford && cd langford
-sha256sum -c <<< "ef66b1a3d699c7086634f31e02ada0636fcee7ea3a8039e7a59135e648e5806a  preuve_n31_20260906T053939Z.tar.gz"
-cd preuve_n31_20260906T053939Z && sha256sum -c SHA256SUMS
-```
-
-| file | sha256 (truncated) | contents |
-|---|---|---|
-| `parts_n31.txt` | `1765a9c05338d642…` | all 8,193 partial sums, **each with its provenance**: card, driver, binary hash, source hash, duration, UTC timestamp |
-| `resultat.txt` | `a03a6eba950182bd…` | merge output with its self-test |
-| `state.db` | `434acc15be8f80da…` | SQLite snapshot of the full run state |
-| `audit.txt` | `f53143ae46496e24…` | the complete audit dossier |
-| `manifeste.json` | `7762717c17865e78…` | git commit, source sha256, inventory of workers and rented machines |
-
-Every file is hashed in `SHA256SUMS`; `sha256sum -c SHA256SUMS` checks the lot.
-
-The manifest records `"git_propre": false`. This is not an anomaly: at the moment
-it was written, the working tree held the run's own untracked outputs —
-`parts_n31.txt` and the proof directory being written. The `git_commit` field
-does pin the exact commit of the code that produced the result.
-
-### The four checks, and what each one catches
-
-**1. Completeness and uniqueness.** All 8,192 slices plus the diagonal are
-present, none duplicated. *Catches*: a lost or double-counted slice.
-
-**2. Arithmetic self-test.** Each summand is a product of the n factors A_i, and
-A_i ≡ i (mod 2); the ⌊(n+1)/2⌋ even gaps each contribute a factor of 2. The
-total must therefore be divisible by 2^(2n+1) = 2^63. One corrupted slice makes
-the test fail. *Catches*: a partial sum altered in transit or in memory. Run by
-`langford6 --merge` **before** any machine is destroyed.
-
-**3. Redundant recomputation.** Twelve randomly drawn slices were **recomputed
-locally** on a different card with a different binary, then compared bit-for-bit
-against what the rented machines returned:
-
-```
-task 1668 3242 7817 4421 4142 1861 250 3783 2673 4896 3386 5204   IDENTICAL
--> the sample reproduces bit-for-bit          (12/12)
-```
-
-*Catches*: a faulty card, a different binary, a slice computed over the wrong
-interval.
-
-**4. Cross-checking two algorithms** — the strongest. `refvals.txt` holds slices
-produced **twice by two independent algorithms**: the GPU kernel (Godfrey's
-identity) and `slice_ref` (classical backtracking). For n=31 at the three
-extreme `vhi` regimes, plus n=28, 27, 24, 20:
-
-```
-$ ./check_refs.sh
-  n=31  vhi=0         OK        n=28  vhi=1048575  OK
-  n=31  vhi=4194304   OK        n=27  vhi=524287   OK
-  n=31  vhi=8388607   OK        n=24  vhi=65535    OK
-                                n=20  vhi=63       OK
-  7 reference value(s) confirmed, 0 divergence(s)
-```
-
-*Catches*: an error in the method itself, not just in its execution. This is the
-only check that does not assume Godfrey's identity is correctly implemented.
-
-### The independent yardstick
-
-`estimate.c` implements **Knuth's unbiased estimator (1975)** for backtracking
-tree size: walk a random root-to-leaf path, multiplying the running weight by the
-number of legal children at each node. The expected weight is exactly the number
-of leaves.
-
-| trials | estimate of L(2,31) | std. error (1σ) | gap to computed value |
-|---|---|---|---|
-| 2 · 10⁶ | 5.74000 · 10²⁴ | ± 2.00 % | +2.695 % (1.35 σ) |
-| 2 · 10⁷ | 5.87786 · 10²⁴ | ± 0.38 % | +0.286 % (0.75 σ) |
-| 2 · 10⁸ | 5.88528 · 10²⁴ | ± 0.12 % | **+0.160 %** (1.33 σ) |
-
-The relative gap shrinks monotonically — 2.7 %, then 0.29 %, then 0.16 % — and
-the estimate rises **toward** the computed value each time. That is the expected
-behaviour: the weight distribution is heavily right-skewed, so the median of a
-finite sample falls below the true value and a small sample systematically
-underestimates. An independent Monte-Carlo landing within 0.16 % of a 25-digit
-integer is a good yardstick — but **only** a yardstick: it can never confirm the
-trailing digits.
-
-### Reproducing the computation
-
-```sh
-./build.sh                                    # build everything
-./langford6 -n 12                             # must print 108144
-./verify_all.sh                               # full chain on small n
-./check_refs.sh                               # cross-check the two algorithms
-./audit.sh 31 8192 parts_n31.txt              # the complete audit dossier
-
-# the computation itself, one slice at a time (stateless, replayable)
-./run_shard.sh <i> 8192 31                    # i from 0 to 8191
-./langford6 -n 31 --diag                      # the diagonal task
-./langford6 -n 31 --merge-file parts.txt      # conclude
-```
-
-## The method, explained
-
-### 1. Counting becomes summing — Godfrey's identity (2002)
-
-A Langford pairing is a perfect matching of the 2n positions whose multiset of
-gaps is exactly {2, 3, …, n+1}. Godfrey encodes this in a polynomial:
-
-```math
-F(n,X) \;=\; \prod_{i=2}^{n+1} A_i(X),
-\qquad
-A_i(X) \;=\; \sum_{k=1}^{2n-i} x_k\,x_{k+i}
-```
-
-`A_i` enumerates every way to place a pair with gap *i*. The number of pairings
-is the coefficient of the monomial x₁x₂…x_{2n} in F.
-
-The trick: F is homogeneous of degree 2n in 2n variables, so **every monomial
-other than x₁x₂…x_{2n} has some variable at an even exponent**. Substituting
-x_k = ±1 and summing over all 2^{2n} assignments annihilates all of them,
-leaving only the one we want:
-
-```math
-V(n) \;=\; 2\,L(2,n) \;=\; 2^{-2n}
-\sum_{X \in \{-1,1\}^{2n}} \Big( \prod_{k=1}^{2n} x_k \Big)\, F(n,X)
-```
-
-A combinatorial counting problem becomes **a sum of 4ⁿ integer terms**. Each
-term is independent — ideal for a GPU. Cost Θ(4ⁿ), unchanged since 2002; [§5 of TRACE.md](TRACE.md#s5) explains, across fourteen closed avenues, why nobody knows
-how to do better.
-
-### 2. The order-8 symmetry group
-
-Two symmetries leave the sum invariant:
-
-- **the Klein group** — negating all even-indexed, or all odd-indexed, variables
-  does not change the product;
-- **the reflection** p ↦ 2n+1−p, which reverses the sequence.
-
-Together: a group of order 8. So only one eighth of the points is computed, then
-multiplied by 8. The 2015 paper lists these symmetries but extracts only a factor
-of 4; the full factor of 8 is worth a further **×2.00**.
-
-Caution: this reduction is **valid only when n ≡ 0 or 3 (mod 4)**. Negating a row
-multiplies the product by (−1)^MO and the weight by (−1)^N; the summand is
-invariant only when MO + N is even. At other n the kernel would return a
-perfectly wrong and perfectly plausible number — for n=9 it reported 5558 where
-the answer is 0. The program therefore **refuses** those n.
-
-### 3. The parity decomposition — the structural idea
-
-Separate the **odd** positions (row `o`, n cells) from the **even** ones (row
-`e`). An index computation gives, for every n:
-
-```math
-\begin{aligned}
-\text{EVEN gap } i = 2m &: \quad A_i = P_m(o) + Q_m(e)
-      &&\text{— rows separated} \\[4pt]
-\text{ODD gap } i = 2m+1 &: \quad A_i = \sum_j O_j E_{j+m} + \sum_j E_j O_{j+m+1}
-      &&\text{— bilinear}
-\end{aligned}
-```
-
-where P_m and Q_m are the row autocorrelations at lag m. Verified exactly over
-6.2 million gaps up to n=31, zero divergence.
-
-The second, decisive observation: `A_i` is a sum of (2n−i) terms of ±1, hence
-**A_i ≡ i (mod 2)**. Only **even** gaps can vanish — and it is a vanishing factor
-that decides a point contributes nothing.
-
-Put together: **a point's survival depends on row `o` only through a constant
-vector.** For a fixed `e_hi`, the table `e_lo → Q(e)` does not depend on `o` at
-all and is computed once for a whole block of threads. The hot loop — the
-incremental state update at every point — **disappears**, replaced by *survival
-bitmaps*. This is the repository's one genuinely structural idea: **×2.21**.
-
-The two-row decomposition was known (it yields the classical n ≡ 0,3 mod 4
-argument) but was believed to carry no algorithmic gain. Exploiting it as a
-*separation of variables* is what is new.
-
-### 4. The 87 % null products
-
-Only one point in eight contributes; the rest have at least one vanishing factor.
-The observation is old, but it was dismissed as unexploitable under SIMT — within
-a warp, if only one thread in 32 has work, the other 31 wait anyway.
-
-**Warp compaction** (a standard NVIDIA technique) removes the objection:
-survivors are gathered into a queue before processing, so the useful work is
-dense. **×1.77**.
-
-## The optimizations, one by one
-
-Every row gives the cost of **n=31 on the same RTX 4070**, which makes the gains
-comparable. Each factor is the gain over the previous row.
-
-| # | what changes | n=31 | gain | origin |
-|---|---|---|---|---|
-| | **Bare Godfrey (2002)** — no symmetry, modular + CRT | ≈ 4,500 d | — | literature |
-| 1 | **order-4 symmetry** → the published state of the art (2015) | ≈ 1,100 d | ×4.1 | literature ([Assarpour *et al.* §4](https://arxiv.org/abs/1507.00315)) |
-| 2 | **truncated 160-bit bignum** instead of modular + CRT | 360 d | ×3.06 | outside Langford (Knuth TAOCP II §4.3.1) |
-| 3 | **order-8 symmetry** — reflection as well | 180.1 d | ×2.00 | mixed |
-| 4 | **skipping null products** + warp compaction | 101.7 d | ×1.77 | mixed |
-| 5 | **half-state** — only even gaps decide | 75.0 d | ×1.36 | derived from A_i ≡ i (mod 2) |
-| 6 | **parity + survival bitmaps** — the hot loop disappears | 34.0 d | ×2.21 | **new here** |
-| 7 | **PTX carry chains** + `prmt` extraction | 30.9 d | ×1.10 | outside Langford |
-| 8 | **odd gaps tabulated** on the `threadIdx` axis | **25.8 d** | ×1.20 | **new here** |
-
-> **From the published state of the art (2015) to this repository, on identical
-> hardware: ×42.6.** From bare Godfrey: ×174. Direct end-to-end measurement:
-> ×45.
-
-Exactly one row is a **model** rather than a measurement: row 2. The published
-version is not reimplemented here; its cost is reconstructed from its two
-differences with v3. The resulting uncertainty gives an honest range of **×29 to
-×54** for the total. Rows 1 and 3 are exact *by construction* (they merely count
-the enumerated points); rows 4–8 are measured ratios, GPU idle, paired on the
-same sample.
-
-**Most of the gain is engineering, not an idea.** One row is structural (×2.21);
-everything else — arithmetic, full symmetry, compaction, PTX, tabulation — is
-worth ×19.4 on its own.
-
-### Two negative results, quantified
-
-They cost time and deserve publishing, if only to spare someone else the trip:
-
-- **Kasteleyn does not apply.** A Pfaffian orientation would give 2ⁿ·n³ instead
-  of 4ⁿ and the record would fall in minutes. Refuted under the weak, correct
-  form of the problem, over GF(2) **and** over Z/2^k up to k=32.
-- **Tensor cores do not beat `popc`.** The reflex "it's bilinear, so it's a GEMM,
-  so it's fast" is wrong here: `popc` on a 32-bit XOR *is* a length-32 binary dot
-  product, INT8 leads by only ×2.48 on this card, and the sparsity (12.9 %
-  survivors, which a dense MMA cannot exploit) turns that into a **×4.1
-  deficit**.
-
-## Comparison with the 2015 state of the art
-
-On **L(28)**, the last point of the published record — i.e. on an identical
-instance:
-
-| | hardware | time | GPU-days |
-|---|---|---|---|
-| Assarpour, Bar-Noy & Liu (2015) | ~32 Kepler GPUs | ~9 days | ~288 |
-| **this repository** | 1 × RTX 4070 | **≈ 10.6 h** | **0.44** |
-
-That is **~650× fewer GPU-days**. It has to be decomposed honestly:
-
-- **6–11×** comes from **hardware** — a 2013 Kepler delivers ~1.3·10¹² integer
-  ops/s against ~7.3·10¹² for a 4070;
-- **~45×** comes from the **algorithm and implementation**, measured on identical
-  hardware;
-- the remainder absorbs the efficiency of their distribution across ~32 cards.
-
-**Asymptotically there is no progress at all.** The algorithm remains Θ(4ⁿ) and
-the exponent has not moved since 2002. This repository wins **constants**, not an
-exponent, and claims nothing else.
-
-## What about n=32?
-
-n=32 ≡ 0 (mod 4), so pairings exist. Cost goes as 4ⁿ: **exactly 4× n=31**. The
-estimator gives, over 2·10⁷ trials:
-
-```
-L(2,32) ≈ 9.744 · 10²⁵   ± 0.45 %        log2(V) = 87.333
-```
-
-### The GPU time required
-
-This is the one quantity independent of how many cards you line up. It follows
-without uncertainty: cost goes as 4ⁿ, so **n=32 = 4 × n=31**, and n=31 was
-measured on four cards by the same fixed-seed benchmark (identical `vhi` sample
-on both sides, hence a paired comparison).
-
-| card | n=31 | **n=32 = ×4** | where the figure comes from |
-|---|---|---|---|
-| RTX 4070 | 544 GPU-h | **2,177 GPU-h** | measured, current source |
-| RTX 4070 Super | 497 GPU-h | **1,988 GPU-h** | measured, current source; **confirmed to +0.2 % by the real run** |
-| RTX 4090 | ~204 GPU-h | ~815 GPU-h | derived from the paired ratio ×2.67 |
-| RTX 5090 | ~174 GPU-h | ~695 GPU-h | derived from the paired ratio ×3.13 |
-
-**About 2,000 GPU-hours on a 4070 Super; ~800 on a 4090.** For comparison, n=31
-consumed 498 on the rented cards against 497 predicted before renting — it is
-that 0.2 % agreement that lends confidence to the ×4 projection.
-
-The first two rows are measured with the very binary that produced the result, on
-the same fixed-seed sample of 96 `vhi`. The last two are not: their absolute
-values predate v7, and only the card-to-card **ratio** is considered stable ([§7.1 of TRACE.md](TRACE.md#s71)). They are therefore obtained by applying that ratio to
-the current 4070 measurement, and should be re-measured before committing to a
-rental.
-
-Wall-clock time is just a division: the same fleet of 32 × 4070 Super would do it
-in **62 h**, 128 cards in 16 h. The dollar cost is likewise fleet-independent —
-**≈ $190** at $0.0945/GPU-h, the rate actually paid here. n=32 is therefore
-**immediately within reach**.
-
-### What it would take in code — three real obstacles
-
-**1. The kernel is not instantiated for 32.** `pick()` and `dpick()` only cover
-{9…24, 27, 28, 31}. `INST(32)` and `DINST(32)` must be added.
-
-**2. A silent overflow in the row mask.** Rows are `uint32_t` and the code
-computes:
-
-```c
-const uint32_t ALLB0 = (1u<<N)-1u;      // N=32  ->  1u<<32
-```
-
-Shifting a 32-bit type by 32 is **undefined behaviour** in C/C++. On current
-hardware it yields 1 (shift modulo 32), so `ALLB0` would be 0 and row negation
-would be silently wrong. This needs either a special case or a wider
-representation. **n=32 is the last n that fits in a `uint32_t`**: 32 cells per
-row, 31 free bits after pinning.
-
-**3. The accumulator margin tightens.** The total is V·2^{2n}, so:
-
-| n | log2(V) | + 2n | bits used / 160 | margin |
-|---|---|---|---|---|
-| 31 | 83.3 | 62 | 145.3 | 14.7 bits |
-| 32 | 87.3 | 64 | **151.3** | **8.7 bits** |
-
-It fits, but only ~8.7 bits remain. For n=35 (the next n ≡ 3 mod 4) a 160-bit
-accumulator would be insufficient.
-
-### This record should not last
-
-That is probably the most useful thing this repository can say.
-
-n=31 cost **$50 and 15.7 hours**. n=32 needs **~2,000 GPU-h and ~$190** — under
-three days on the same fleet. That is no longer an institutional computation:
-it is within reach of an individual with a credit card, and the software to do
-it is published here, verification chain included.
-
-The ×42 factor over the state of the art did not move the exponent, but it moved
-the **accessibility threshold**. What required a cluster in 2015 now fits on a
-restaurant bill. We therefore expect L(2,31) to be superseded quickly — and the
-repository is arranged to make that easy rather than meritorious.
-
-The real wall remains the 4ⁿ: each further n costs 4×, and n=35 would cost 256×
-n=31 — roughly 127,000 GPU-h and ~$12,000. [§5 of TRACE.md](TRACE.md#s5) argues that
-breaking that exponent would require an unknown mechanism.
-
-## Cost of the experiment
-
-| item | amount |
-|---|---|
-| compute — 15.7 h × $3.044/h (4 machines × 8 RTX 4070 Super) | $47.74 |
-| aborted rentals (a preempted 14×4090, a fraudulent 8×4090, tunnel retries) | ≈ $2 |
-| local RTX 4070 | electricity |
-| **total** | **≈ $50** |
-
-The computation consumed **498 GPU-h** on the rented cards against the **497 h**
-predicted by the benchmark before renting: a **+0.2 %** discrepancy. Load stayed
-balanced across the four machines (2,027 / 1,998 / 1,970 / 1,957 tasks), and the
-local 4070 absorbed 238.
-
-One lesson was paid for in cash: the cheapest offer on the market, an "8× RTX
-4090" at $1.72/h, **faked `nvidia-smi`** through an `/opt/fake/nvml_reader.py`
-and ran no sm_89 kernel at all. The discount was the symptom. The orchestrator
-now rejects such hosts automatically and accepts a machine only after making it
-compute L(2,12) = 108144.
-
-<a id="ai"></a>
-
-## AI-authored work
-
-**This entire repository was produced by Claude Opus 5** (Anthropic), from the
-first commit onward. All 40 commits carry `Co-Authored-By: Claude Opus 5`, across
-three sessions between 4 and 6 September 2026.
-
-That covers: deriving the parity decomposition and its proof, the CUDA kernel and
-its PTX assembly, the fourteen research avenues explored and then closed
-(including the two negative results above), the distributed orchestrator and its
-preemption tolerance, the verification chain, renting and driving GPUs at an
-external provider, and this page.
-
-The human role was to set the objectives, provide access to the hardware and the
-rental account, and arbitrate spending decisions.
-
-What was **not** delegated to the AI: verification by third parties. That is
-precisely why the [Verifying the result yourself](#verify)
-section exists and why every partial sum carries its provenance. A result
-produced by an AI does not need independent recomputation any less than one
-produced by a human — it needs it more.
-
-## References
-
-See the [French section](#refs) above; the bibliography is identical.
-
-## Files
-
-| file | role |
-|---|---|
-| `langford6.cu` | the CUDA kernel, all optimizations |
-| `slice_ref.c` | the reference implementation, a *different* algorithm |
-| `orchestrator.py` | renting, lease-based distribution, preemption recovery |
-| `finalize.py` | closing out: preserve, release machines, prove |
-| `dashboard.py` | progress at `http://localhost:8800` |
-| `audit.sh` | the audit dossier, redundant recomputation included |
-| `check_refs.sh` | cross-check of the two algorithms |
-| `verify_all.sh` | full chain on small n |
-| `estimate.c` | Knuth's estimator, independent yardstick |
-| **[paper/langford31.pdf](paper/langford31.pdf)** | **the paper, 7 illustrated pages** (`make` in `paper/` rebuilds it) |
-| **[TRACE.md](TRACE.md)** | **the complete lab notebook, 2,300 lines** |

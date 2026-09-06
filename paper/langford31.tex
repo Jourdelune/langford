@@ -25,11 +25,17 @@
 
 \title{\bfseries Counting Langford Pairings:\\[2pt] the exact value of $L(2,31)$}
 
-\author{Claude Opus 5\thanks{Anthropic. This paper, the algorithm it describes,
-its CUDA implementation, the distributed orchestration, the verification chain
-and the computation itself were produced by the author, an AI system. The human
-collaborator set the objectives, provided hardware access and arbitrated
-spending. See §\ref{sec:authorship}.}}
+\author{
+  Claude Opus 5\thanks{Anthropic. Produced the entire work: the derivation, the
+  CUDA kernel, the distributed orchestration, the verification chain, the
+  computation itself, and this paper. See §\ref{sec:authorship}.}
+  \\[2pt] \normalsize Anthropic
+  \and
+  Jourdelune\thanks{\texttt{jourdelune863@gmail.com}. Set the objectives and
+  provided the payment method for renting GPUs. Contributed no mathematics, no
+  code and no text.}
+  \\[2pt] \normalsize \texttt{jourdelune863@gmail.com}
+}
 
 \date{6 September 2026}
 
@@ -139,34 +145,6 @@ A combinatorial counting problem has become a sum of $4^n$ integer terms, each
 independent of the others. That independence is what makes the problem suit a
 GPU, and it is also what makes the cost $\Theta(4^n)$ --- an exponent unchanged
 since 2002.
-
-\subsection{Why \texorpdfstring{$V(n) = 2L(2,n)$}{V(n) = 2L(2,n)}}
-
-The two quantities count different objects. Equation~\eqref{eq:godfrey} produces
-$V(n)$, the number of \emph{arrangements}: sequences as written, left to right.
-The conventional $L(2,n)$ of \texttt{A014552} counts pairings \emph{up to
-reversal}, treating a sequence and its mirror image as one object. The factor of
-two between them is exact, and for a reason worth stating.
-
-\begin{proposition}
-No Langford pairing is its own mirror image.
-\end{proposition}
-
-\begin{proof}
-Suppose an arrangement is invariant under the reflection $p \mapsto 2n+1-p$.
-The pair carrying value $k$ occupies positions $i$ and $i+k+1$; its image is
-$\{2n-i-k,\; 2n+1-i\}$. Invariance forces
-$\{2n-i-k,\,2n+1-i\} = \{i,\,i+k+1\}$, hence $2i = 2n-k$. For odd $k$ this has
-no integer solution, and since the values run over $1,\dots,n$ with $n \ge 3$ an
-odd $k$ always occurs.
-\end{proof}
-
-The reflection is therefore a fixed-point-free involution: it pairs arrangements
-exactly two by two, and $V(n)$ is even. The implementation turns this into a
-test, requiring divisibility of the raw total by $2^{2n+1}$ rather than
-$2^{2n}$. The extra bit is precisely this one, and it converts an odd $V$ ---
-which the final shift would otherwise truncate in silence --- into an error
-rather than a plausible wrong answer.
 
 \subsection{The symmetry group of order eight}
 
@@ -347,11 +325,28 @@ adversarial. Four checks were run; each catches a different failure.
 diagonal task are present, none duplicated. \emph{Catches} a lost or
 double-counted slice.
 
-\paragraph{2. Arithmetic self-test.} By $A_i \equiv i \pmod 2$, the
-$\lfloor (n+1)/2 \rfloor$ even gaps each contribute a factor of two, so the raw
-total must be divisible by $2^{2n+1} = 2^{63}$. A single corrupted slice fails
-the test. \emph{Catches} a partial sum altered in transit or in memory. This
-check runs before any rented machine is released.
+\paragraph{2. Two arithmetic self-tests.} These are distinct, and they fire at
+different moments.
+
+\emph{Per slice, on arrival.} Every summand is a product of the $n$ factors
+$A_i$, $i = 2,\dots,n+1$, and $A_i \equiv i \pmod 2$; the
+$\lfloor (n+1)/2 \rfloor$ even-indexed factors are therefore each even. Any
+partial sum must be divisible by $2^{\lfloor (n+1)/2 \rfloor} = 2^{16}$ at
+$n=31$. A slice failing this is rejected as it arrives --- its lease expires and
+it returns to the pool --- rather than being discovered weeks later at
+aggregation.
+
+\emph{On the total, before anything is released.} The raw sum equals
+$2^{2n} V(n)$, and $V(n) = 2L(2,n)$ is even, because the reflection
+$p \mapsto 2n+1-p$ is a fixed-point-free involution on pairings: invariance
+would force $2i = 2n-k$ for the pair carrying value $k$, which has no integer
+solution for odd $k$. The total must therefore be divisible by
+$2^{2n+1} = 2^{63}$, not merely $2^{2n}$ --- and that extra bit turns an odd
+$V$, which the final shift would silently truncate, into an error rather than a
+plausible wrong answer. A single missing or corrupted slice fails it.
+
+\emph{Catches} a partial sum altered in transit or in memory, and a slice lost
+between workers. The second test runs before any rented machine is released.
 
 \paragraph{3. Redundant recomputation.} Twelve slices drawn at random were
 recomputed on a different card, with a different binary, and compared
